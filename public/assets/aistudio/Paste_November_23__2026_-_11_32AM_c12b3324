@@ -1,0 +1,1413 @@
+# PROMPT MAÎTRE — SCHOLARFIND
+## Conception UI/UX et développement d'une plateforme intelligente de bourses d'études
+
+# 1. RÔLE
+
+Agis simultanément comme :
+
+- Un Senior Product Designer spécialisé dans les logiciels professionnels et les plateformes éducatives.
+- Un expert en UX Research et Human-Centered Design.
+- Un directeur artistique spécialisé dans les identités visuelles numériques.
+- Un architecte frontend senior.
+- Un développeur React, TypeScript et Tailwind CSS.
+- Un expert en conception d'interfaces SaaS B2B2C.
+
+Tu possèdes une expérience approfondie dans la conception d'applications complexes destinées à plusieurs catégories d'utilisateurs.
+
+Tu dois prendre des décisions de conception cohérentes et justifier les choix importants.
+
+**Je ne souhaite pas un simple prototype graphique. Je veux aboutir à une application frontend complète, fonctionnelle, cohérente et prête à être connectée à un backend.**
+
+Cependant, tu ne dois pas commencer immédiatement à coder.
+
+Tu dois d'abord me présenter plusieurs directions artistiques afin que je puisse valider celle qui sera utilisée.
+
+---
+
+# 2. PRÉSENTATION GÉNÉRALE DU PROJET
+
+## 2.1 Nom de l'application
+
+**SCHOLARFIND**
+
+## 2.2 Intitulé du projet
+
+Conception et implémentation d'un système automatisé de recherche et de vérification d'éligibilité aux bourses d'études : SCHOLARFIND.
+
+## 2.3 Contexte
+
+De nombreux étudiants rencontrent des difficultés pour identifier les bourses d'études correspondant à leur profil.
+
+Les opportunités sont dispersées sur différents sites :
+
+- Universités.
+- Ministères.
+- Fondations.
+- Ambassades.
+- Organismes de coopération.
+- Organisations internationales.
+- Entreprises proposant des programmes de financement.
+
+Chaque organisme possède ses propres conditions : nationalité, diplôme, niveau académique, moyenne, âge, spécialité, pays de résidence, compétences linguistiques, etc.
+
+La recherche et la vérification manuelles de ces conditions prennent du temps.
+
+Parallèlement, certains organismes financeurs éprouvent des difficultés à identifier les candidats correspondant aux critères de leurs programmes de bourses.
+
+SCHOLARFIND souhaite résoudre ces deux problèmes.
+
+## 2.4 Solution proposée
+
+SCHOLARFIND est une plateforme web permettant :
+
+**Aux étudiants :**
+- De rechercher des bourses.
+- De consulter les conditions des programmes.
+- De vérifier automatiquement leur éligibilité.
+- De recevoir des recommandations adaptées.
+- De recevoir des invitations provenant d'organismes financeurs.
+
+**Aux organismes financeurs :**
+- De publier des programmes de bourses.
+- De définir des critères de sélection.
+- De rechercher des étudiants correspondant à ces critères.
+- D'inviter des candidats.
+- De gérer les candidatures.
+- D'organiser les processus de sélection.
+- D'enregistrer leurs décisions d'attribution.
+
+La plateforme fonctionne donc dans les deux sens.
+
+**Les étudiants trouvent des bourses et les organismes trouvent des candidats.**
+
+---
+
+# 3. PUBLIC CIBLE
+
+SCHOLARFIND ne concerne pas uniquement les étudiants de Master.
+
+La plateforme doit prendre en compte les différents parcours académiques :
+
+- Bacheliers souhaitant poursuivre leurs études.
+- Étudiants en BTS.
+- Étudiants en DUT.
+- Étudiants en HND.
+- Étudiants en Licence.
+- Étudiants en Master.
+- Doctorants.
+- Diplômés recherchant une formation complémentaire.
+- Candidats aux formations professionnelles.
+
+Le système doit distinguer trois informations :
+
+1. Le diplôme déjà obtenu.
+2. Le niveau d'études actuel.
+3. Le niveau ou la formation recherchée.
+
+Ces informations ne doivent jamais être confondues.
+
+L'application est initialement destinée au marché camerounais, avec une ambition de déploiement international.
+
+L'interface doit donc pouvoir évoluer vers plusieurs pays et plusieurs systèmes éducatifs.
+
+---
+
+# 4. OBJECTIFS DU PRODUIT
+
+SCHOLARFIND poursuit quatre objectifs principaux.
+
+### Objectif 1 — Centraliser
+
+Regrouper les informations sur les opportunités de bourses d'études au sein d'une plateforme unique.
+
+### Objectif 2 — Vérifier
+
+Comparer automatiquement les critères d'une bourse avec les informations académiques d'un étudiant.
+
+### Objectif 3 — Recommander
+
+Proposer des opportunités adaptées au niveau d'études, au domaine de formation, aux préférences et aux critères académiques du candidat.
+
+### Objectif 4 — Mettre en relation
+
+Permettre aux étudiants et aux organismes financeurs de se découvrir et d'entrer en contact dans un environnement sécurisé.
+
+Ces objectifs doivent guider toutes les décisions de conception.
+
+---
+
+# 5. RÉFÉRENCE VISUELLE PRINCIPALE
+
+Je souhaite que tu t'inspires fortement de l'identité graphique et de l'expérience utilisateur du site suivant :
+
+https://employeecare-espace-responsable.ai.studio/
+
+Ce site constitue ma principale référence visuelle.
+
+Analyse attentivement :
+
+- La disposition générale des pages.
+- La structure de navigation.
+- La hiérarchie typographique.
+- Les proportions des composants.
+- Les espacements.
+- Les tableaux.
+- Les cartes.
+- Les formulaires.
+- Les boutons.
+- Les menus latéraux.
+- Les en-têtes.
+- Les états interactifs.
+- Les transitions.
+- La manière dont les informations sont organisées.
+
+Je souhaite retrouver la même philosophie de conception.
+
+Cependant, SCHOLARFIND doit posséder sa propre identité visuelle.
+
+**Je ne veux pas simplement copier EmployeeCare en changeant le logo et les textes.**
+
+Je veux conserver les qualités de son design et les adapter aux besoins de SCHOLARFIND.
+
+Si tu ne peux pas accéder au site de référence, signale cette limitation et utilise les captures d'écran que je pourrai fournir. Ne prétends jamais avoir analysé une interface inaccessible.
+
+---
+
+# 6. DIRECTION ARTISTIQUE
+
+Explore une direction :
+
+**Corporate Editorial + Human-Centered Design.**
+
+Cette direction doit associer le sérieux des plateformes institutionnelles à la simplicité des applications modernes.
+
+L'interface doit inspirer :
+
+- La confiance.
+- L'excellence académique.
+- La transparence.
+- La crédibilité.
+- L'accessibilité.
+- La modernité.
+- La discrétion.
+- Le professionnalisme.
+
+Je souhaite une identité visuelle forte, mais sans excès décoratif.
+
+Le résultat ne doit pas ressembler aux interfaces génériques produites automatiquement par l'intelligence artificielle.
+
+## 6.1 Principes graphiques
+
+Privilégie :
+
+- Des mises en page aérées.
+- Une typographie élégante.
+- Une hiérarchie visuelle rigoureuse.
+- Des composants sobres.
+- Des couleurs maîtrisées.
+- Des bordures fines.
+- Des espacements cohérents.
+- Des tableaux lisibles.
+- Des formulaires simples.
+- Des interactions discrètes.
+- Des pages adaptées aux tâches réelles des utilisateurs.
+
+Chaque élément doit avoir une utilité.
+
+La qualité doit venir de la composition, des proportions et de la cohérence visuelle.
+
+---
+
+# 7. PROPOSITIONS DE COULEURS
+
+Je ne veux pas reprendre les couleurs d'EmployeeCare.
+
+Explore trois nouvelles identités graphiques.
+
+## Direction A — Academic Editorial
+
+Une identité institutionnelle moderne.
+
+Palette indicative :
+
+- Bleu encre : `#213C5A`
+- Ivoire : `#F8F6F1`
+- Bleu clair : `#E7EFF5`
+- Cuivre discret : `#B97853`
+- Texte principal : `#253343`
+- Blanc : `#FFFFFF`
+
+Cette direction doit évoquer les grandes institutions académiques internationales.
+
+## Direction B — Contemporary Prestige
+
+Une identité premium, élégante et distinctive.
+
+Palette indicative :
+
+- Bordeaux profond : `#612F43`
+- Crème : `#FBF7F1`
+- Or doux : `#B38B53`
+- Anthracite : `#292D33`
+- Beige clair : `#F1EAE4`
+- Blanc : `#FFFFFF`
+
+Cette direction doit évoquer l'excellence et la crédibilité.
+
+## Direction C — Modern Education
+
+Une identité lumineuse, moderne et accessible.
+
+Palette indicative :
+
+- Bleu cobalt : `#2855A6`
+- Blanc : `#FFFFFF`
+- Bleu très clair : `#F4F7FC`
+- Vert sauge : `#76A58D`
+- Texte principal : `#25324A`
+- Gris secondaire : `#64748B`
+
+Cette direction doit inspirer la confiance et la modernité.
+
+**Important :**
+
+Les trois propositions doivent être réellement différentes.
+
+Ne présente pas simplement trois variantes de couleurs appliquées à une structure identique.
+
+Tu peux améliorer les palettes proposées si tu justifies tes choix.
+
+---
+
+# 8. TYPOGRAPHIE
+
+Explore des associations typographiques professionnelles.
+
+Polices possibles :
+
+- DM Sans.
+- DM Serif Display.
+- Inter.
+- Manrope.
+- Plus Jakarta Sans.
+- Libre Baskerville.
+
+Ma préférence va vers une association proche de :
+
+**DM Sans pour l'interface + DM Serif Display pour certains titres éditoriaux.**
+
+N'utilise pas systématiquement la police serif.
+
+Elle doit intervenir uniquement lorsque cela améliore l'identité et la hiérarchie visuelle.
+
+Définis une échelle typographique cohérente pour :
+
+- Les titres de pages.
+- Les sous-titres.
+- Les sections.
+- Les cartes.
+- Les tableaux.
+- Les formulaires.
+- Les informations secondaires.
+- Les messages d'état.
+
+---
+
+# 9. ÉLÉMENTS VISUELS À ÉVITER
+
+Je ne veux pas :
+
+- De dégradés décoratifs systématiques.
+- D'interfaces violettes génériques.
+- D'accumulation de cartes arrondies.
+- D'ombres excessives.
+- De graphiques inutiles.
+- D'illustrations 3D artificielles.
+- D'icônes purement décoratives.
+- D'animations qui ralentissent les tâches.
+- De boutons surdimensionnés.
+- De pages surchargées.
+- De tableaux illisibles.
+- De couleurs trop saturées.
+- De textes génériques.
+- D'une mise en page identique sur tous les écrans.
+- De composants placés uniquement pour remplir l'espace.
+
+Évite également les titres tels que :
+
+« Welcome to your dashboard »
+
+ou
+
+« Your journey starts here ».
+
+Préfère des formulations naturelles, précises et adaptées à SCHOLARFIND.
+
+---
+
+# 10. PRINCIPES UX
+
+Respecte les principes suivants.
+
+1. Un utilisateur doit comprendre rapidement ce que propose SCHOLARFIND.
+2. La recherche de bourses doit être simple.
+3. Les informations académiques doivent être faciles à renseigner.
+4. Les filtres doivent être pertinents et compréhensibles.
+5. Les résultats d'éligibilité doivent être explicables.
+6. Les organismes doivent pouvoir gérer leurs campagnes efficacement.
+7. Les informations sensibles doivent être protégées.
+8. Les formulaires doivent expliquer les erreurs.
+9. Les interfaces doivent être accessibles au clavier.
+10. Les contrastes doivent être suffisants.
+11. Les états de chargement doivent être clairs.
+12. Les actions importantes doivent demander confirmation lorsque nécessaire.
+13. L'interface doit fonctionner sur ordinateur, tablette et smartphone.
+14. Les messages doivent être rédigés dans un français clair.
+15. Chaque écran doit répondre à un besoin utilisateur réel.
+
+Ne confonds jamais une interface élégante avec une interface compliquée.
+
+---
+
+# 11. ARCHITECTURE FONCTIONNELLE
+
+SCHOLARFIND doit comporter quatre espaces principaux.
+
+## A. ESPACE ÉTUDIANT
+
+Cet espace est destiné aux personnes recherchant un financement pour leurs études.
+
+### Tableau de bord
+
+Il doit présenter :
+
+- Une synthèse du profil académique.
+- Les bourses recommandées.
+- Les nouvelles opportunités.
+- Les dates limites importantes.
+- Les bourses enregistrées.
+- Les invitations reçues.
+- Les informations manquantes dans le profil.
+
+Le tableau de bord doit rester simple et accueillant.
+
+### Profil académique
+
+L'étudiant doit pouvoir renseigner :
+
+- Nom et prénom.
+- Nationalité.
+- Pays de résidence.
+- Diplômes obtenus.
+- Niveau d'études actuel.
+- Formation recherchée.
+- Domaine d'études.
+- Établissement de formation.
+- Année académique.
+- Moyenne académique.
+- Échelle de notation.
+- Langues maîtrisées.
+- Pays de destination souhaités.
+- Types de financement recherchés.
+
+Utilise un formulaire progressif plutôt qu'un formulaire extrêmement long.
+
+Distingue clairement les informations obligatoires des informations facultatives.
+
+### Recherche de bourses
+
+Créer un catalogue permettant de :
+
+- Rechercher par mots-clés.
+- Filtrer par pays.
+- Filtrer par niveau d'études.
+- Filtrer par domaine.
+- Filtrer par type de financement.
+- Filtrer par date limite.
+- Consulter les détails d'une offre.
+- Trier les résultats.
+- Ajouter une bourse aux favoris.
+
+### Vérification d'éligibilité
+
+L'étudiant doit pouvoir lancer une vérification de compatibilité pour une bourse.
+
+Le résultat doit distinguer :
+
+- **Potentiellement compatible**
+- **Incompatible**
+- **À compléter**
+- **À vérifier**
+
+L'interface doit afficher chaque critère et son résultat.
+
+Exemple :
+
+Nationalité : satisfaite.
+
+Diplôme exigé : satisfait.
+
+Moyenne minimale : satisfaite.
+
+Certification linguistique : information manquante.
+
+Résultat global : **À compléter**.
+
+Ne présente jamais un résultat positif comme une garantie d'obtention de bourse.
+
+### Recommandations
+
+Créer une page affichant les bourses pertinentes selon le profil académique et les préférences de l'étudiant.
+
+Les recommandations doivent être explicables.
+
+### Invitations
+
+L'étudiant doit pouvoir :
+
+- Recevoir une invitation d'un organisme.
+- Consulter les informations du programme.
+- Accepter ou refuser l'invitation.
+- Consulter l'historique de ses réponses.
+
+### Favoris et notifications
+
+Prévoir :
+
+- Une liste des bourses favorites.
+- Des rappels d'échéance.
+- Des notifications relatives aux invitations.
+- Des alertes sur les nouvelles opportunités.
+- Une gestion des préférences.
+
+### Confidentialité
+
+L'étudiant doit pouvoir activer ou désactiver sa visibilité auprès des organismes.
+
+Par défaut, le profil doit rester privé.
+
+---
+
+## B. ESPACE ORGANISME FINANCEUR
+
+Cet espace est destiné aux structures proposant des financements.
+
+Il concerne notamment les universités, fondations, ONG, entreprises et organismes de coopération.
+
+### Tableau de bord
+
+Afficher uniquement des informations utiles :
+
+- Programmes de bourses actifs.
+- Nombre de candidatures.
+- Invitations envoyées.
+- Dossiers en cours d'évaluation.
+- Décisions enregistrées.
+- Échéances importantes.
+
+### Profil institutionnel
+
+L'organisme doit pouvoir renseigner :
+
+- Nom officiel.
+- Type d'organisation.
+- Pays.
+- Adresse.
+- Site web.
+- Description.
+- Coordonnées professionnelles.
+- Informations nécessaires à sa vérification.
+
+Un organisme doit être vérifié avant de pouvoir accéder aux fonctions sensibles de recherche de candidats.
+
+### Gestion des programmes de bourses
+
+L'organisme doit pouvoir :
+
+- Créer une bourse.
+- Définir son intitulé.
+- Décrire le programme.
+- Définir les niveaux concernés.
+- Préciser le financement.
+- Ajouter les critères.
+- Définir les échéances.
+- Publier le programme.
+- Modifier ou clôturer une campagne.
+
+### Recherche de candidats
+
+Créer une interface permettant de rechercher des étudiants ayant accepté de rendre leur profil accessible.
+
+Filtres possibles :
+
+- Niveau d'études.
+- Diplôme.
+- Filière.
+- Pays.
+- Nationalité.
+- Résultats académiques, lorsque leur utilisation est autorisée et pertinente.
+- Compétences linguistiques.
+- Formation recherchée.
+
+Les résultats doivent afficher uniquement les informations accessibles à l'organisme.
+
+Ne divulgue jamais automatiquement les coordonnées privées ou les documents personnels.
+
+### Invitations
+
+L'organisme peut sélectionner un candidat et lui envoyer une invitation à consulter un programme.
+
+Le candidat reste libre d'accepter ou de refuser.
+
+### Gestion des candidatures
+
+Prévoir différents états :
+
+- Candidature reçue.
+- En cours d'examen.
+- Informations complémentaires demandées.
+- Présélectionnée.
+- Retenue.
+- Non retenue.
+
+La décision finale d'attribution appartient à l'organisme.
+
+### Gestion des évaluateurs
+
+Les organismes disposant des autorisations nécessaires peuvent inviter des collaborateurs chargés d'examiner les dossiers.
+
+Prévoir des permissions adaptées.
+
+### Statistiques
+
+Afficher des données réellement utiles au suivi des campagnes.
+
+Évite les graphiques purement décoratifs.
+
+---
+
+## C. ESPACE CURATEUR
+
+Le curateur est chargé de contrôler la qualité des annonces de bourses.
+
+Son espace doit comprendre :
+
+### Tableau de bord
+
+- Annonces en attente.
+- Annonces vérifiées.
+- Annonces rejetées.
+- Sources à contrôler.
+- Doublons détectés.
+
+### Vérification des annonces
+
+Le curateur doit pouvoir :
+
+- Consulter une annonce collectée.
+- Vérifier sa source.
+- Contrôler les critères.
+- Corriger les informations.
+- Valider ou rejeter l'annonce.
+- Publier une offre.
+- Archiver une annonce périmée.
+
+### Gestion de la fiabilité
+
+Chaque annonce doit conserver :
+
+- Sa source.
+- Sa date de récupération.
+- Sa dernière date de vérification.
+- Son statut.
+- Son historique de modifications.
+
+---
+
+## D. ESPACE ADMINISTRATEUR
+
+L'administrateur supervise l'ensemble de la plateforme.
+
+### Gestion des utilisateurs
+
+- Consulter les comptes.
+- Rechercher des utilisateurs.
+- Activer ou désactiver un compte.
+- Gérer les rôles.
+- Consulter les opérations administratives autorisées.
+
+### Gestion des organismes
+
+- Examiner les demandes d'inscription.
+- Vérifier les structures.
+- Approuver ou rejeter un compte.
+- Suspendre un organisme.
+- Consulter les activités institutionnelles autorisées.
+
+### Gestion des bourses
+
+- Superviser les annonces.
+- Contrôler les publications.
+- Gérer les sources.
+- Consulter les signalements.
+
+### Gestion commerciale
+
+- Consulter les abonnements.
+- Gérer les formules.
+- Consulter les souscriptions simulées.
+- Suivre les campagnes ponctuelles.
+
+### Supervision
+
+- Consulter les statistiques globales.
+- Consulter les journaux d'audit.
+- Suivre les incidents.
+- Configurer les paramètres.
+
+---
+
+# 12. MODÈLE ÉCONOMIQUE
+
+SCHOLARFIND adopte un modèle **B2B2C**.
+
+Les étudiants disposent gratuitement des fonctions essentielles.
+
+Les organismes financent le fonctionnement de la plateforme en souscrivant à des services professionnels.
+
+## Formules proposées
+
+### Étudiant — Gratuit
+
+Accès aux fonctionnalités essentielles :
+
+- Recherche.
+- Vérification d'éligibilité.
+- Recommandations.
+- Favoris.
+- Notifications.
+- Invitations reçues.
+
+### Organisme Découverte — Gratuit
+
+Accès institutionnel limité.
+
+### Organisme Pro — 50 000 FCFA/mois
+
+- Gestion de plusieurs campagnes.
+- Recherche de candidats volontaires.
+- Invitations.
+- Gestion des candidatures.
+- Statistiques.
+
+### Organisme Premium — 150 000 FCFA/mois
+
+- Gestion avancée des campagnes.
+- Collaboration entre évaluateurs.
+- Rapports détaillés.
+- Fonctionnalités institutionnelles étendues.
+
+### Campagne ponctuelle — À partir de 75 000 FCFA
+
+Une structure peut organiser une campagne sans abonnement mensuel.
+
+**Ces prix sont des hypothèses commerciales destinées à la démonstration.**
+
+Ils ne constituent pas une tarification définitivement validée.
+
+L'interface doit permettre de présenter ces offres sans donner l'impression d'une application agressivement commerciale.
+
+Ne prévois aucun paiement permettant à un étudiant d'obtenir artificiellement une meilleure éligibilité ou une priorité dans la sélection.
+
+Les données personnelles des étudiants ne doivent pas constituer un produit commercial.
+
+---
+
+# 13. MOTEUR D'ÉLIGIBILITÉ
+
+Le système doit reposer sur une logique de règles métier explicables.
+
+Chaque bourse possède des critères obligatoires et éventuellement des critères préférentiels.
+
+Les critères doivent pouvoir concerner :
+
+- La nationalité.
+- Le pays de résidence.
+- Le diplôme requis.
+- Le niveau de formation visé.
+- La filière.
+- La moyenne.
+- L'âge, lorsqu'une condition officielle le prévoit.
+- La langue.
+- Les autres conditions explicites du programme.
+
+Une information absente ne doit pas être interprétée comme une condition non satisfaite.
+
+Une équivalence académique incertaine ne doit jamais être supposée automatiquement.
+
+Le résultat doit toujours être accompagné d'une justification.
+
+Pour la démonstration frontend, implémente un moteur de règles local simple, déterministe et testable.
+
+Ce moteur simulera les réponses attendues du futur backend Java.
+
+Il doit pouvoir traiter correctement :
+
+- Un profil compatible.
+- Un critère obligatoire non satisfait.
+- Une information manquante.
+- Une condition ambiguë.
+- Une bourse expirée.
+- Une annonce non vérifiée.
+
+Le résultat positif doit être intitulé **« Potentiellement compatible »**.
+
+Ne jamais afficher « Bourse obtenue » ou « Admission garantie » à l'issue d'une simple vérification.
+
+---
+
+# 14. SÉCURITÉ ET PROTECTION DES DONNÉES
+
+SCHOLARFIND traite des informations personnelles et académiques.
+
+Le design et les fonctionnalités doivent intégrer la confidentialité dès la conception.
+
+Principes :
+
+- Profil privé par défaut.
+- Visibilité institutionnelle activée volontairement.
+- Possibilité de retirer cette autorisation.
+- Accès limité aux données.
+- Aucune transmission automatique des dossiers privés.
+- Consentement spécifique avant le partage d'informations avec un organisme.
+- Interfaces de modification et de suppression des données.
+- Historique des actions importantes.
+- Gestion des autorisations selon les rôles.
+
+Prévoir des garanties supplémentaires pour les utilisateurs mineurs.
+
+Le projet doit tenir compte de la loi camerounaise n° 2024/017 du 23 décembre 2024 relative à la protection des données à caractère personnel.
+
+Ne prétends pas que le frontend assure à lui seul la conformité juridique ou la sécurité.
+
+Les contrôles définitifs devront être réalisés par le backend et les procédures organisationnelles.
+
+---
+
+# 15. TECHNOLOGIES
+
+Le frontend doit être développé avec :
+
+- React.
+- TypeScript.
+- Tailwind CSS.
+- Lucide Icons.
+- React Router.
+- Une bibliothèque de graphiques si nécessaire.
+- Une bibliothèque de gestion de formulaires adaptée.
+- Des composants réutilisables.
+
+Je ne veux pas de dépendances ajoutées sans justification.
+
+Le backend sera développé séparément en :
+
+**Java + Spring Boot**
+
+Base de données :
+
+**PostgreSQL**
+
+Communication future :
+
+**API REST**
+
+L'architecture frontend doit donc être organisée pour permettre une connexion ultérieure à Spring Boot.
+
+Prévois une couche de services séparant clairement les composants React de l'accès aux données.
+
+---
+
+# 16. DONNÉES DE DÉMONSTRATION
+
+Pour le moment, le frontend doit fonctionner sans backend réel.
+
+Utilise des données fictives représentatives d'une utilisation normale.
+
+Prévois :
+
+- Plusieurs profils étudiants.
+- Différents niveaux d'études.
+- Plusieurs programmes de bourses.
+- Différents pays.
+- Plusieurs domaines académiques.
+- Des programmes actifs et expirés.
+- Des invitations.
+- Des candidatures.
+- Des organismes.
+- Des notifications.
+- Des abonnements fictifs.
+
+Toutes les bourses inventées doivent être identifiables comme des données de démonstration.
+
+Ne présente pas des programmes fictifs comme des bourses officielles réellement ouvertes.
+
+Utilise des profils fictifs, sans données personnelles réelles.
+
+Pour la démonstration, utilise le stockage local lorsque cela est pertinent.
+
+Les modifications doivent persister après le rafraîchissement de la page.
+
+L'authentification sera simulée, mais son fonctionnement doit être clairement séparé d'une véritable authentification sécurisée.
+
+N'utilise pas localStorage comme preuve de sécurité ou comme solution définitive de stockage de données sensibles.
+
+---
+
+# 17. INTERACTIONS FONCTIONNELLES
+
+Je ne souhaite pas une application dans laquelle les boutons ne servent à rien.
+
+Les principales interactions doivent fonctionner.
+
+Exemples :
+
+### Espace étudiant
+
+L'utilisateur peut :
+
+- Compléter son profil.
+- Rechercher des bourses.
+- Modifier ses filtres.
+- Consulter une annonce.
+- Lancer une vérification.
+- Enregistrer une bourse.
+- Retirer un favori.
+- Consulter une invitation.
+- Accepter ou refuser une invitation.
+- Modifier ses préférences.
+- Activer ou désactiver sa visibilité institutionnelle.
+
+### Espace organisme
+
+L'utilisateur peut :
+
+- Créer une campagne.
+- Modifier ses critères.
+- Rechercher des profils accessibles.
+- Envoyer une invitation.
+- Examiner une candidature.
+- Modifier son statut.
+- Enregistrer une décision.
+- Consulter les statistiques.
+
+### Espace curateur
+
+L'utilisateur peut :
+
+- Consulter une annonce.
+- Corriger ses informations.
+- Approuver ou rejeter une annonce.
+- Publier ou archiver une bourse.
+
+### Espace administrateur
+
+L'utilisateur peut :
+
+- Consulter les comptes.
+- Vérifier un organisme.
+- Modifier un statut.
+- Consulter les abonnements simulés.
+- Examiner les statistiques.
+
+Aucune action simulée ne doit prétendre avoir envoyé un véritable e-mail, effectué un paiement réel ou déposé une candidature auprès d'un organisme externe.
+
+---
+
+# 18. STRUCTURE DES PAGES
+
+Prévois notamment les pages suivantes :
+
+## Pages publiques
+
+- Accueil.
+- Catalogue des bourses.
+- Détail d'une bourse.
+- Fonctionnement de SCHOLARFIND.
+- Présentation des organismes.
+- Tarification.
+- Connexion.
+- Inscription.
+
+## Pages étudiant
+
+- Tableau de bord.
+- Mon profil.
+- Rechercher des bourses.
+- Bourses recommandées.
+- Vérification d'éligibilité.
+- Mes favoris.
+- Mes invitations.
+- Mes notifications.
+- Paramètres et confidentialité.
+
+## Pages organisme
+
+- Tableau de bord.
+- Profil institutionnel.
+- Mes programmes.
+- Créer une campagne.
+- Rechercher des candidats.
+- Invitations envoyées.
+- Candidatures.
+- Évaluation des dossiers.
+- Décisions d'attribution.
+- Statistiques.
+- Abonnement et facturation.
+
+## Pages curateur
+
+- Tableau de bord.
+- Annonces à vérifier.
+- Sources.
+- Gestion des doublons.
+- Historique des validations.
+
+## Pages administrateur
+
+- Tableau de bord.
+- Utilisateurs.
+- Organismes.
+- Programmes.
+- Sources.
+- Abonnements.
+- Journaux d'audit.
+- Paramètres.
+
+Chaque espace doit avoir une navigation adaptée à ses utilisateurs.
+
+N'utilise pas automatiquement la même disposition pour les pages publiques et les interfaces internes.
+
+---
+
+# 19. RESPONSIVE DESIGN ET ACCESSIBILITÉ
+
+L'application doit fonctionner sur :
+
+- Ordinateur.
+- Tablette.
+- Smartphone.
+
+La navigation doit s'adapter à la taille de l'écran.
+
+Sur mobile, les tableaux complexes doivent disposer d'une présentation alternative adaptée.
+
+Les formulaires doivent être facilement utilisables sur petit écran.
+
+Prévois :
+
+- Navigation au clavier.
+- Indicateurs de focus.
+- Contrastes suffisants.
+- Libellés accessibles.
+- États d'erreur compréhensibles.
+- États vides soignés.
+- États de chargement.
+- Messages de confirmation.
+- Gestion des erreurs.
+
+Le design doit être conforme autant que possible aux recommandations WCAG 2.2 niveau AA.
+
+---
+
+# 20. ARCHITECTURE FRONTEND
+
+Organise le code de manière professionnelle.
+
+Prévois une structure modulaire, par exemple :
+
+```text
+src/
+├── app/
+├── components/
+│   ├── ui/
+│   ├── layout/
+│   └── shared/
+├── features/
+│   ├── auth/
+│   ├── students/
+│   ├── scholarships/
+│   ├── eligibility/
+│   ├── recommendations/
+│   ├── organizations/
+│   ├── campaigns/
+│   ├── applications/
+│   ├── invitations/
+│   ├── curation/
+│   ├── administration/
+│   └── billing/
+├── hooks/
+├── services/
+├── types/
+├── data/
+├── utils/
+└── styles/
+```
+
+Cette structure est indicative et peut être adaptée si une organisation plus cohérente est justifiée.
+
+Respecte les principes suivants :
+
+- Séparation des responsabilités.
+- Composants réutilisables.
+- Types TypeScript explicites.
+- Gestion cohérente des états.
+- Navigation centralisée.
+- Services d'accès aux données séparés.
+- Validation des formulaires.
+- Traitement des erreurs.
+- Code maintenable.
+- Absence de duplication inutile.
+
+Le frontend ne doit pas dépendre directement de structures de données dispersées dans les composants.
+
+---
+
+# 21. PRÉPARATION À L'INTÉGRATION SPRING BOOT
+
+L'application doit pouvoir être connectée ultérieurement au backend Java.
+
+Prévois des interfaces et services clairement définis pour :
+
+- L'authentification.
+- Les utilisateurs.
+- Les profils académiques.
+- Les bourses.
+- Les sources.
+- Les critères d'éligibilité.
+- Les résultats d'évaluation.
+- Les organismes.
+- Les programmes.
+- Les invitations.
+- Les candidatures.
+- Les notifications.
+- Les abonnements.
+
+Les données simulées doivent être accessibles à travers des services interchangeables.
+
+L'objectif est de pouvoir remplacer progressivement les services de démonstration par des appels HTTP vers Spring Boot.
+
+Ne développe pas le backend Java dans cette phase.
+
+Ne prétends pas qu'une API externe est disponible si elle n'a pas encore été créée.
+
+---
+
+# 22. MÉTHODOLOGIE DE TRAVAIL
+
+Le développement doit être progressif et contrôlé.
+
+Je ne veux pas que tu génères toute l'application sans organisation.
+
+## PHASE 1 — RECHERCHE ET DIRECTION ARTISTIQUE
+
+Commence uniquement par proposer trois directions artistiques.
+
+Pour chacune, présente :
+
+1. Son identité visuelle.
+2. Sa palette.
+3. Ses typographies.
+4. Sa structure de navigation.
+5. Ses principes de mise en page.
+6. Son tableau de bord étudiant.
+7. Son tableau de bord organisme.
+8. Son catalogue de bourses.
+9. Son interface de vérification d'éligibilité.
+10. Ses avantages et ses limites UX.
+
+Les trois directions doivent être visuellement différentes.
+
+Présente des propositions concrètes, et pas seulement une description textuelle de couleurs.
+
+Compare ensuite les trois propositions.
+
+Recommande la plus pertinente pour SCHOLARFIND et justifie ton choix.
+
+**Arrête-toi après cette première phase et attends que je valide une direction.**
+
+## PHASE 2 — DESIGN SYSTEM
+
+Après validation de la direction artistique :
+
+Crée un design system comprenant :
+
+- Couleurs.
+- Typographies.
+- Espacements.
+- Boutons.
+- Champs.
+- Tableaux.
+- Cartes.
+- Modales.
+- Notifications.
+- Badges.
+- Menus.
+- Composants de navigation.
+- États interactifs.
+
+Tous les éléments doivent respecter la direction artistique validée.
+
+## PHASE 3 — PLANIFICATION
+
+Avant de développer les différentes fonctionnalités, crée un fichier nommé :
+
+**etapes.md**
+
+Ce fichier doit contenir toutes les étapes nécessaires pour terminer l'application.
+
+Chaque étape doit être suffisamment détaillée pour être compréhensible par un développeur débutant.
+
+Classe les étapes dans un ordre logique.
+
+Utilise des cases à cocher Markdown.
+
+Exemple :
+
+```markdown
+# Plan de développement SCHOLARFIND
+
+## Étape 1 — Initialisation
+- [ ] Initialiser le projet React.
+- [ ] Configurer TypeScript.
+- [ ] Configurer Tailwind CSS.
+- [ ] Installer les dépendances utiles.
+
+## Étape 2 — Design system
+- [ ] Définir les couleurs.
+- [ ] Configurer les typographies.
+- [ ] Créer les composants communs.
+- [ ] Créer les layouts.
+
+## Étape 3 — Authentification simulée
+- [ ] Créer la connexion.
+- [ ] Créer l'inscription.
+- [ ] Préparer les comptes de démonstration.
+
+...
+```
+
+Complète ce plan avec toutes les fonctionnalités nécessaires.
+
+À chaque étape terminée :
+
+- Vérifie le résultat.
+- Corrige les éventuelles erreurs.
+- Coche les tâches réalisées.
+- Passe à l'étape suivante.
+
+Ne coche jamais une tâche qui n'est pas réellement terminée.
+
+## PHASE 4 — DÉVELOPPEMENT
+
+Développe l'application progressivement.
+
+Commence par :
+
+1. La structure générale.
+2. Les composants réutilisables.
+3. La navigation.
+4. Les pages publiques.
+5. L'espace étudiant.
+6. Le moteur d'éligibilité simulé.
+7. L'espace organisme.
+8. L'espace curateur.
+9. L'espace administrateur.
+10. Les fonctionnalités commerciales.
+11. Les interactions et données persistantes.
+
+Respecte l'architecture frontend définie.
+
+## PHASE 5 — TESTS ET CORRECTIONS
+
+Vérifie notamment :
+
+- Le fonctionnement des routes.
+- Le chargement des pages.
+- Les filtres.
+- Les formulaires.
+- Les validations.
+- Les favoris.
+- Les recommandations.
+- Les évaluations d'éligibilité.
+- Les invitations.
+- Les campagnes.
+- Les permissions simulées.
+- La cohérence des données.
+- La persistance locale.
+- Le responsive design.
+- L'accessibilité de base.
+
+Corrige les erreurs constatées.
+
+## PHASE 6 — FINALISATION
+
+À la fin du développement :
+
+- Vérifie que toutes les pages prévues existent.
+- Vérifie la cohérence graphique.
+- Vérifie les parcours utilisateurs.
+- Vérifie les interactions principales.
+- Vérifie les données de démonstration.
+- Vérifie que le projet peut démarrer.
+- Vérifie que `etapes.md` reflète les tâches réellement terminées.
+
+Produis également un fichier README expliquant :
+
+- Le projet.
+- Les technologies.
+- L'installation.
+- Le lancement.
+- Les comptes de démonstration.
+- Les fonctionnalités disponibles.
+- Les limites de la simulation.
+- Les étapes nécessaires pour connecter Spring Boot.
+
+---
+
+# 23. NIVEAU DE QUALITÉ ATTENDU
+
+Je souhaite un résultat de qualité professionnelle.
+
+Chaque page doit être travaillée individuellement.
+
+Ne te contente pas de générer une navigation et quelques cartes.
+
+Les interfaces doivent être cohérentes avec les tâches des utilisateurs.
+
+Les tableaux de bord doivent contenir des informations pertinentes.
+
+Les formulaires doivent être utilisables.
+
+Les recherches doivent produire des résultats cohérents.
+
+Les filtres doivent fonctionner.
+
+Les boutons doivent déclencher les actions attendues.
+
+Les données doivent pouvoir être modifiées dans la démonstration.
+
+La navigation doit rester fluide.
+
+Les états d'erreur doivent être traités.
+
+La qualité visuelle ne doit pas être sacrifiée pour accélérer le développement.
+
+---
+
+# 24. PRIORITÉS FONCTIONNELLES
+
+Le cahier des charges distingue un socle académique et des évolutions commerciales.
+
+Tu dois conserver cette distinction.
+
+## Priorité 1 — Socle académique
+
+- Authentification simulée.
+- Profils académiques.
+- Catalogue de bourses.
+- Recherche et filtres.
+- Vérification d'éligibilité.
+- Résultats explicables.
+- Favoris.
+- Administration des annonces.
+
+Ce socle doit être fonctionnel en priorité.
+
+## Priorité 2 — Fonctionnalités institutionnelles
+
+- Comptes organismes.
+- Recherche de candidats volontaires.
+- Création de campagnes.
+- Invitations.
+- Gestion des candidatures.
+- Décisions d'attribution.
+
+## Priorité 3 — Évolutions commerciales
+
+- Formules d'abonnement.
+- Gestion des plans.
+- Tableau de bord commercial.
+- Facturation simulée.
+- Statistiques avancées.
+
+Les fonctionnalités de priorité 2 et 3 doivent pouvoir être intégrées sans remettre en cause l'architecture du socle.
+
+---
+
+# 25. CRITÈRES D'ACCEPTATION
+
+Le frontend sera considéré comme satisfaisant lorsque :
+
+1. Les quatre espaces utilisateurs seront accessibles en démonstration.
+2. Chaque espace disposera d'une navigation cohérente.
+3. Les principales pages seront fonctionnelles.
+4. Un étudiant pourra rechercher une bourse.
+5. Il pourra obtenir un résultat d'éligibilité explicable.
+6. Il pourra enregistrer une offre.
+7. Il pourra gérer ses préférences de visibilité.
+8. Un organisme pourra créer une campagne fictive.
+9. Il pourra rechercher uniquement des profils autorisés.
+10. Il pourra envoyer une invitation simulée.
+11. Un étudiant pourra répondre à cette invitation.
+12. Un organisme pourra enregistrer une décision de sélection.
+13. Le curateur pourra valider une annonce.
+14. L'administrateur pourra gérer les comptes de démonstration.
+15. Les données seront cohérentes entre les différents espaces.
+16. Les interactions fonctionneront sans backend réel.
+17. Le design sera responsive.
+18. La direction artistique validée sera respectée.
+19. Le projet pourra être lancé localement.
+20. L'architecture permettra l'intégration future du backend Spring Boot.
+
+---
+
+# 26. INSTRUCTIONS FINALES
+
+Je souhaite obtenir une plateforme SCHOLARFIND qui semble avoir été conçue par une véritable équipe composée de designers et de développeurs expérimentés.
+
+Je ne veux pas :
+
+- Un prototype incomplet.
+- Une simple succession de pages statiques.
+- Un template SaaS générique.
+- Une interface exagérément décorative.
+- Un projet rempli de boutons non fonctionnels.
+- Un développement désorganisé.
+- Des données incohérentes.
+- Des choix graphiques arbitraires.
+
+Je veux :
+
+**Une application professionnelle, élégante, fonctionnelle, accessible, cohérente et prête à évoluer vers un véritable produit commercial.**
+
+Le design doit s'inspirer de la philosophie d'EmployeeCare tout en construisant une identité visuelle propre à SCHOLARFIND.
+
+Le frontend doit pouvoir être connecté ultérieurement à une API Java Spring Boot et PostgreSQL.
+
+Le modèle économique B2B2C doit être pris en compte dès la conception, sans compromettre la confidentialité des étudiants.
+
+## CONSIGNE DE DÉMARRAGE
+
+**Commence maintenant uniquement par la PHASE 1.**
+
+Analyse la référence visuelle lorsque cela est possible.
+
+Présente trois directions artistiques réellement différentes pour SCHOLARFIND.
+
+Montre comment elles s'appliqueraient aux principaux écrans.
+
+Compare-les et recommande une direction.
+
+**Attends ma validation avant de commencer le design system et le développement React.**
+
+Après validation, suis rigoureusement les étapes prévues jusqu'à la réalisation complète du frontend.
