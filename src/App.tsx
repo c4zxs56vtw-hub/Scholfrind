@@ -231,6 +231,10 @@ export default function App() {
               element={<AdminProgramsPage />}
             />
             <Route
+              path="/admin/bourses"
+              element={<AdminProgramsPage />}
+            />
+            <Route
               path="/admin/sources"
               element={<CuratorSourcesPage />}
             />

@@ -359,9 +359,15 @@ export const PublicCatalogPage: React.FC = () => {
   );
 
   // Évaluation de chaque bourse filtrée pour distinguer les bourses trouvées des bourses compatibles
+  // Conformément à OpenAPI 1.1 : aucun brouillon (publicationStatus !== 'PUBLISHED' ou status === 'DRAFT') n'est exposé publiquement.
   const evaluatedResults = useMemo(() => {
     const baseFiltered = scholarships
       .filter((s) => {
+        if (s.status === 'DRAFT') return false;
+        if (s.publicationStatus && s.publicationStatus !== 'PUBLISHED') {
+          return false;
+        }
+        if (s.curationStatus === 'ARCHIVED') return false;
         if (!includeExpired && s.status === 'EXPIRED') return false;
         if (
           keyword.trim() !== '' &&
@@ -1623,13 +1629,21 @@ export const PricingPage: React.FC = () => {
 export const AuthPage: React.FC<{ mode: 'LOGIN' | 'REGISTER' }> = ({
   mode,
 }) => {
-  const { users, switchDemoUser, switchDemoRole, showToast } = useApp();
+  const {
+    users,
+    switchDemoUser,
+    switchDemoRole,
+    registerStudentAccount,
+    showToast,
+  } = useApp();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('amina.ndongo@etudiant-demo.cm');
   const [password, setPassword] = useState('demo-scholarfind-2026');
   const [registerRole, setRegisterRole] = useState<UserRole>('STUDENT');
   const [fullName, setFullName] = useState('');
+  const [nationality, setNationality] = useState('Cameroun');
+  const [residenceCountry, setResidenceCountry] = useState('Cameroun');
   const [error, setError] = useState('');
 
   const navigateForRole = (role: UserRole) => {
@@ -1661,6 +1675,20 @@ export const AuthPage: React.FC<{ mode: 'LOGIN' | 'REGISTER' }> = ({
     } else {
       if (!fullName.trim()) {
         setError('Veuillez indiquer votre nom complet ou le nom de votre structure.');
+        return;
+      }
+      if (registerRole === 'STUDENT') {
+        const parts = fullName.trim().split(/\s+/);
+        const firstName = parts[0] || fullName.trim();
+        const lastName = parts.slice(1).join(' ') || 'Étudiant';
+        registerStudentAccount({
+          firstName,
+          lastName,
+          email: email.trim(),
+          nationality,
+          residenceCountry,
+        });
+        navigate('/etudiant/profil');
         return;
       }
       switchDemoRole(registerRole);

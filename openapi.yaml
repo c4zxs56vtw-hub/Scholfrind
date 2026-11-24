@@ -1,0 +1,2330 @@
+openapi: 3.0.3
+info:
+  title: SCHOLARFIND B2B2C REST API
+  version: 1.0.0
+  description: |
+    Contrat d'interface OpenAPI 3.0 complet de la plateforme **SCHOLARFIND** (Système automatisé de recherche, de recommandation explicable, de vérification d'éligibilité aux bourses d'études et de mise en relation B2B2C).
+
+    ### Architecture & Conformité
+    - **Backend cible** : Java 21 / Spring Boot 3.x + Spring Security (JWT + RBAC) + PostgreSQL.
+    - **Distinction académique stricte** : Le schéma distingue systématiquement les 3 niveaux académiques (`highestDiplomaObtained`, `currentStudyLevel`, `targetStudyLevel`).
+    - **Moteur d'éligibilité déterministe & explicable** : Évalue 9 critères obligatoires, normalise les moyennes (`SUR_20`, `GPA_4`, `POURCENTAGE_100` vers `/20`) et retourne l'un des 4 verdicts (`POTENTIALLY_COMPATIBLE`, `TO_COMPLETE`, `TO_VERIFY`, `INCOMPATIBLE`).
+    - **Protection des données personnelles (Loi camerounaise n° 2024/017 du 23 décembre 2024)** :
+      - Profil étudiant privé par défaut (`institutionalVisibilityEnabled: false`).
+      - Anonymisation des profils visibles dans le vivier organisme (`CAND-CM-YYYY-XXXX`).
+      - Consentement spécifique horodaté requis avant tout partage de dossier suite à une invitation.
+  contact:
+    name: Équipe Architecture SCHOLARFIND
+    email: api@scholarfind.cm
+  license:
+    name: Propriétaire — Projet Académique & Industriel SCHOLARFIND
+
+servers:
+  - url: https://api.scholarfind.cm/api/v1
+    description: Serveur de production
+  - url: http://localhost:8080/api/v1
+    description: Serveur local Spring Boot (Développement)
+
+tags:
+  - name: Auth
+    description: Authentification JWT, inscription étudiant/organisme et session courante
+  - name: Scholarships
+    description: Catalogue public des bourses, recherche multicritère et détails vérifiés
+  - name: Students
+    description: Gestion du profil académique, consentement de visibilité (Loi n° 2024/017), favoris et recommandations
+  - name: Eligibility
+    description: Moteur déterministe d'évaluation et d'explicabilité d'éligibilité critère par critère
+  - name: Invitations & Applications
+    description: Invitations institutionnelles, consentement de partage de dossier et suivi des candidatures
+  - name: Organizations
+    description: Gestion de l'organisme financeur, campagnes de bourses, vivier de candidats anonymisés, équipe d'évaluateurs et abonnements B2B
+  - name: Curation
+    description: Vérification documentaire des bourses, fiabilité des sources officielles et résolution des doublons
+  - name: Admin
+    description: Gouvernance de la plateforme, vérification des organismes, gestion des comptes et journal d'audit
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================================
+  # 1. AUTHENTIFICATION & COMPTES (/auth)
+  # ============================================================================
+  /auth/register/student:
+    post:
+      tags: [Auth]
+      summary: Inscription d'un nouvel étudiant (100 % gratuit, profil privé par défaut)
+      operationId: registerStudent
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterStudentRequest'
+      responses:
+        '201':
+          description: Compte étudiant créé avec succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Adresse e-mail déjà utilisée
+
+  /auth/register/organization:
+    post:
+      tags: [Auth]
+      summary: Demande d'ouverture de compte pour un organisme financeur (soumis à vérification)
+      operationId: registerOrganization
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterOrganizationRequest'
+      responses:
+        '201':
+          description: Compte organisme créé en statut PENDING (en attente de vérification administrative)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authentification par e-mail et mot de passe (retourne un jeton JWT)
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentification réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Récupère le compte utilisateur connecté et son entité liée (Étudiant ou Organisme)
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Profil de session courant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 2. CATALOGUE PUBLIC DES BOURSES (/scholarships)
+  # ============================================================================
+  /scholarships:
+    get:
+      tags: [Scholarships]
+      summary: Recherche et filtrage multicritère dans le catalogue des bourses
+      operationId: searchScholarships
+      security: []
+      parameters:
+        - name: q
+          in: query
+          description: Mot-clé (titre, organisme, pays, description)
+          schema:
+            type: string
+        - name: targetLevel
+          in: query
+          description: Niveau d'études financé recherché
+          schema:
+            $ref: '#/components/schemas/AcademicLevel'
+        - name: requiredDiploma
+          in: query
+          description: Dernier diplôme déjà obtenu par le candidat
+          schema:
+            $ref: '#/components/schemas/AcademicLevel'
+        - name: domain
+          in: query
+          description: Domaine de formation éligible
+          schema:
+            $ref: '#/components/schemas/StudyDomain'
+        - name: hostCountry
+          in: query
+          description: Pays d'accueil de la bourse
+          schema:
+            type: string
+        - name: fundingType
+          in: query
+          description: Type de couverture financière
+          schema:
+            $ref: '#/components/schemas/FundingType'
+        - name: includeExpired
+          in: query
+          description: Inclure les bourses dont la date limite est dépassée
+          schema:
+            type: boolean
+            default: false
+        - name: onlyVerified
+          in: query
+          description: Filtrer uniquement les offres vérifiées par un curateur
+          schema:
+            type: boolean
+            default: false
+        - name: sortBy
+          in: query
+          description: Critère de tri
+          schema:
+            type: string
+            enum: [DEADLINE_ASC, MIN_GRADE_ASC, RECENTLY_VERIFIED]
+            default: DEADLINE_ASC
+      responses:
+        '200':
+          description: Liste des bourses correspondant aux critères
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scholarship'
+
+  /scholarships/{scholarshipId}:
+    get:
+      tags: [Scholarships]
+      summary: Consulte la fiche détaillée d'une bourse (critères, financement, pièces, traçabilité source)
+      operationId: getScholarshipById
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Fiche complète du programme de bourse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # 3. ESPACE ÉTUDIANT : PROFIL, CONFIDENTIALITÉ, FAVORIS & RECOMMANDATIONS
+  # ============================================================================
+  /students/me/profile:
+    get:
+      tags: [Students]
+      summary: Consulte le profil complet de l'étudiant connecté (3 sections : Identité, Parcours académique, Projet d'études)
+      operationId: getMyStudentProfile
+      responses:
+        '200':
+          description: Profil académique et personnel de l'étudiant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      tags: [Students]
+      summary: Met à jour le profil étudiant et recalcule automatiquement la moyenne normalisée sur 20
+      operationId: updateMyStudentProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: Profil mis à jour avec `normalizedGradeOut20` recalculé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /students/me/privacy:
+    patch:
+      tags: [Students]
+      summary: Active ou révoque la visibilité institutionnelle du profil (Loi camerounaise n° 2024/017)
+      description: |
+        Enregistre une entrée immuable dans le journal d'audit (`PRIVACY_CONSENT`).
+        Lorsque `institutionalVisibilityEnabled` passe à `true`, seuls les organismes vérifiés peuvent voir le profil sous forme anonymisée.
+      operationId: updateStudentPrivacyConsent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrivacyConsentUpdateRequest'
+      responses:
+        '200':
+          description: Paramètres de confidentialité mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+
+  /students/me/favorites:
+    get:
+      tags: [Students]
+      summary: Liste les bourses enregistrées dans les favoris de l'étudiant avec leur rapport d'éligibilité
+      operationId: getMyFavoriteScholarships
+      responses:
+        '200':
+          description: Liste des bourses favorites triées par échéance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvaluatedScholarshipItem'
+
+  /students/me/favorites/{scholarshipId}:
+    post:
+      tags: [Students]
+      summary: Ajoute une bourse aux favoris de l'étudiant
+      operationId: addFavoriteScholarship
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Bourse ajoutée aux favoris
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+    delete:
+      tags: [Students]
+      summary: Retire une bourse des favoris de l'étudiant
+      operationId: removeFavoriteScholarship
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Bourse retirée des favoris
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /students/me/recommendations:
+    get:
+      tags: [Students]
+      summary: Récupère les recommandations personnalisées de bourses basées sur le parcours académique et le domaine
+      description: |
+        Contrairement au catalogue complet, ce point d'accès :
+        1. Exclut les bourses incompatibles (`INCOMPATIBLE`) ou hors domaine/niveau.
+        2. Sépare les résultats en deux groupes :
+           - `strongMatches` : bourses `POTENTIALLY_COMPATIBLE` et vérifiées (`VERIFIED`).
+           - `toCompleteOrVerify` : bourses compatibles avec la filière et le niveau visé mais nécessitant un justificatif manquant (`TO_COMPLETE`) ou une vérification (`TO_VERIFY`).
+        3. Fournit la liste explicite des motifs de recommandation (`reasons`).
+      operationId: getMyRecommendations
+      responses:
+        '200':
+          description: Recommandations structurées et explicables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationsResponse'
+
+  # ============================================================================
+  # 4. MOTEUR D'ÉLIGIBILITÉ EXPLICABLE (/eligibility)
+  # ============================================================================
+  /eligibility/evaluate/{scholarshipId}:
+    get:
+      tags: [Eligibility]
+      summary: Évalue l'éligibilité de l'étudiant connecté pour une bourse donnée (critère par critère)
+      description: |
+        Compare de manière déterministe les 9 critères obligatoires :
+        1. Validité de la campagne (date limite)
+        2. Nationalité éligible
+        3. Pays de résidence
+        4. Dernier diplôme déjà obtenu (`highestDiplomaObtained`)
+        5. Niveau de formation visé (`targetStudyLevel`)
+        6. Filière / Domaine d'études (`studyDomain`)
+        7. Moyenne académique minimale normalisée sur 20 (`normalizedGradeOut20`)
+        8. Compétence et certification linguistique officielle
+        9. Limite d'âge réglementaire
+      operationId: evaluateEligibilityForCurrentStudent
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Rapport d'éligibilité détaillé avec explications et mention légale de non-garantie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /eligibility/simulate:
+    post:
+      tags: [Eligibility]
+      summary: Simule un rapport d'éligibilité à partir d'un profil candidat hypothétique et d'une bourse
+      operationId: simulateEligibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scholarshipId, studentProfile]
+              properties:
+                scholarshipId:
+                  type: string
+                studentProfile:
+                  $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: Rapport d'éligibilité simulé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityReport'
+
+  # ============================================================================
+  # 5. INVITATIONS, CANDIDATURES & NOTIFICATIONS
+  # ============================================================================
+  /students/me/invitations:
+    get:
+      tags: [Invitations & Applications]
+      summary: Liste les invitations reçues par l'étudiant de la part d'organismes financeurs vérifiés
+      operationId: getMyStudentInvitations
+      responses:
+        '200':
+          description: Liste des invitations reçues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+
+  /students/me/invitations/{invitationId}/respond:
+    post:
+      tags: [Invitations & Applications]
+      summary: Accepte (avec consentement explicite de partage du dossier) ou décline une invitation
+      description: |
+        - Si `accept = true`, l'étudiant accorde son consentement spécifique (Loi n° 2024/017) pour transmettre son identité et son dossier académique à l'organisme émetteur, ce qui crée automatiquement un dossier `ApplicationRecord`.
+        - Si `accept = false`, l'invitation passe à `DECLINED` et aucune donnée personnelle n'est transmise.
+      operationId: respondToInvitation
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespondInvitationRequest'
+      responses:
+        '200':
+          description: Invitation mise à jour (et candidature créée si acceptée)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+
+  /students/me/applications:
+    get:
+      tags: [Invitations & Applications]
+      summary: Liste les candidatures soumises par l'étudiant et leur statut d'évaluation
+      operationId: getMyApplications
+      responses:
+        '200':
+          description: Liste des dossiers de candidature de l'étudiant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationRecord'
+    post:
+      tags: [Invitations & Applications]
+      summary: Soumet un dossier de candidature à un programme de bourse
+      operationId: submitApplication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitApplicationRequest'
+      responses:
+        '201':
+          description: Dossier de candidature créé et transmis à l'organisme
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+
+  /notifications:
+    get:
+      tags: [Invitations & Applications]
+      summary: Récupère les notifications de l'utilisateur connecté (échéances, invitations, curation)
+      operationId: getMyNotifications
+      responses:
+        '200':
+          description: Liste des notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AppNotification'
+
+  /notifications/{notificationId}/read:
+    patch:
+      tags: [Invitations & Applications]
+      summary: Marque une notification comme lue
+      operationId: markNotificationRead
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Notification marquée comme lue
+
+  /notifications/read-all:
+    post:
+      tags: [Invitations & Applications]
+      summary: Marque toutes les notifications de l'utilisateur comme lues
+      operationId: markAllNotificationsRead
+      responses:
+        '204':
+          description: Toutes les notifications ont été marquées comme lues
+
+  # ============================================================================
+  # 6. ESPACE ORGANISME FINANCEUR (/organizations)
+  # ============================================================================
+  /organizations/me:
+    get:
+      tags: [Organizations]
+      summary: Récupère le profil institutionnel de l'organisme connecté, son plan actif et ses évaluateurs
+      operationId: getMyOrganizationProfile
+      responses:
+        '200':
+          description: Profil complet de l'organisme financeur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+    put:
+      tags: [Organizations]
+      summary: Met à jour les informations institutionnelles de l'organisme
+      operationId: updateMyOrganizationProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationProfileRequest'
+      responses:
+        '200':
+          description: Profil organisme mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+
+  /organizations/me/scholarships:
+    get:
+      tags: [Organizations]
+      summary: Liste les campagnes de bourses créées par l'organisme connecté
+      operationId: getOrganizationScholarships
+      responses:
+        '200':
+          description: Liste des campagnes de l'organisme
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scholarship'
+    post:
+      tags: [Organizations]
+      summary: Crée et publie une nouvelle campagne de bourse avec ses critères d'éligibilité structurés
+      operationId: createOrganizationScholarship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertScholarshipRequest'
+      responses:
+        '201':
+          description: Campagne créée et soumise à la curation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+  /organizations/me/scholarships/{scholarshipId}:
+    put:
+      tags: [Organizations]
+      summary: Modifie les paramètres ou critères d'une campagne de bourse existante
+      operationId: updateOrganizationScholarship
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertScholarshipRequest'
+      responses:
+        '200':
+          description: Campagne mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+  /organizations/me/talent-pool:
+    get:
+      tags: [Organizations]
+      summary: Recherche dans le vivier de candidats anonymisés ayant activé leur visibilité institutionnelle
+      description: |
+        **Protection des données (Loi n° 2024/017)** :
+        - Retourne uniquement les étudiants ayant `institutionalVisibilityEnabled = true`.
+        - Les profils sont retournés sous un code anonymisé (`CAND-CM-2026-0X`) sans nom, prénom ni e-mail tant que l'étudiant n'a pas accepté une invitation.
+        - La moyenne académique n'est exposée ou filtrable que si `allowAcademicScoreSharing = true`.
+      operationId: searchAnonymizedTalentPool
+      parameters:
+        - name: scholarshipId
+          in: query
+          description: Identifiant de la campagne pour calculer la compatibilité des profils
+          schema:
+            type: string
+        - name: targetLevel
+          in: query
+          schema:
+            $ref: '#/components/schemas/AcademicLevel'
+        - name: domain
+          in: query
+          schema:
+            $ref: '#/components/schemas/StudyDomain'
+        - name: minGradeOut20
+          in: query
+          schema:
+            type: number
+            format: float
+      responses:
+        '200':
+          description: Liste des profils étudiants anonymisés éligibles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnonymizedCandidateProfile'
+
+  /organizations/me/invitations:
+    post:
+      tags: [Organizations]
+      summary: Envoie une invitation à candidater à un profil étudiant ayant activé sa visibilité
+      operationId: sendInvitationToStudent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendInvitationRequest'
+      responses:
+        '201':
+          description: Invitation transmise et notification envoyée à l'étudiant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '403':
+          description: Action refusée (profil étudiant privé ou organisme non vérifié)
+
+  /organizations/me/applications:
+    get:
+      tags: [Organizations]
+      summary: Liste les dossiers de candidature reçus pour les campagnes de l'organisme
+      operationId: getOrganizationApplications
+      parameters:
+        - name: scholarshipId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ApplicationStatus'
+      responses:
+        '200':
+          description: Liste des candidatures reçues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationRecord'
+
+  /organizations/me/applications/{applicationId}/evaluate:
+    patch:
+      tags: [Organizations]
+      summary: Met à jour le statut, la note d'évaluation (/100) et la décision motivée d'une candidature
+      operationId: evaluateApplication
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateApplicationRequest'
+      responses:
+        '200':
+          description: Dossier de candidature mis à jour (et décision tracée dans l'audit si finale)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+
+  /organizations/me/evaluators:
+    post:
+      tags: [Organizations]
+      summary: Ajoute un collaborateur évaluateur à l'équipe de l'organisme
+      operationId: addOrganizationEvaluator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddEvaluatorRequest'
+      responses:
+        '201':
+          description: Collaborateur ajouté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluatorMember'
+
+  /organizations/me/subscription:
+    get:
+      tags: [Organizations]
+      summary: Consulte l'abonnement B2B actif de l'organisme financeur
+      operationId: getOrganizationSubscription
+      responses:
+        '200':
+          description: Détails de l'abonnement commercial
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialSubscription'
+    put:
+      tags: [Organizations]
+      summary: Change la formule d'abonnement B2B de l'organisme (Découverte, Pro, Premium, Campagne ponctuelle)
+      operationId: changeOrganizationPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId:
+                  $ref: '#/components/schemas/PlanTierId'
+      responses:
+        '200':
+          description: Abonnement mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialSubscription'
+
+  # ============================================================================
+  # 7. ESPACE CURATEUR (/curation)
+  # ============================================================================
+  /curation/scholarships/{scholarshipId}:
+    patch:
+      tags: [Curation]
+      summary: Valide, corrige, rejette ou archive une annonce de bourse après vérification de la source officielle
+      operationId: curateScholarship
+      parameters:
+        - $ref: '#/components/parameters/ScholarshipIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurateScholarshipRequest'
+      responses:
+        '200':
+          description: Statut de curation et historique de modification mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+  /curation/sources:
+    get:
+      tags: [Curation]
+      summary: Liste le répertoire des sources officielles surveillées (ministères, ambassades, fondations)
+      operationId: getOfficialSources
+      responses:
+        '200':
+          description: Liste des sources officielles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OfficialSource'
+
+  /curation/sources/{sourceId}:
+    patch:
+      tags: [Curation]
+      summary: Met à jour le statut de fiabilité et les notes de vérification d'une source officielle
+      operationId: updateSourceReliability
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reliabilityStatus]
+              properties:
+                reliabilityStatus:
+                  type: string
+                  enum: [FIABLE, A_SURVEILLER, SUSPECTE]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Source officielle mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialSource'
+
+  /curation/duplicates:
+    get:
+      tags: [Curation]
+      summary: Liste les paires d'annonces suspectées de doublon avec leur score de similarité
+      operationId: getDuplicateCandidates
+      responses:
+        '200':
+          description: Liste des doublons potentiels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DuplicateCandidate'
+
+  /curation/duplicates/{duplicateId}/resolve:
+    post:
+      tags: [Curation]
+      summary: Fusionne/archive un doublon confirmé ou écarte le signalement
+      operationId: resolveDuplicateCandidate
+      parameters:
+        - name: duplicateId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [MERGED_ARCHIVED, DISMISSED]
+      responses:
+        '200':
+          description: Signalement de doublon traité
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DuplicateCandidate'
+
+  # ============================================================================
+  # 8. ESPACE ADMINISTRATEUR (/admin)
+  # ============================================================================
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Liste l'ensemble des comptes utilisateurs de la plateforme
+      operationId: listAllUsers
+      responses:
+        '200':
+          description: Liste des comptes utilisateurs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserAccount'
+
+  /admin/users/{userId}/status:
+    patch:
+      tags: [Admin]
+      summary: Active ou désactive un compte utilisateur
+      operationId: toggleUserActiveStatus
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Statut du compte mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+
+  /admin/users/{userId}/role:
+    patch:
+      tags: [Admin]
+      summary: Modifie le rôle RBAC d'un compte utilisateur
+      operationId: changeUserRole
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/UserRole'
+      responses:
+        '200':
+          description: Rôle utilisateur mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+
+  /admin/organizations/{organizationId}/verify:
+    patch:
+      tags: [Admin]
+      summary: Accorde, suspend ou rejette l'accréditation d'un compte organisme financeur
+      operationId: verifyOrganizationAccount
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verificationStatus]
+              properties:
+                verificationStatus:
+                  type: string
+                  enum: [VERIFIED, PENDING, SUSPENDED, REJECTED]
+      responses:
+        '200':
+          description: Statut de vérification de l'organisme mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Consulte le journal d'audit réglementaire et opérationnel (consentements Loi n° 2024/017, curation, décisions)
+      operationId: getAuditLogs
+      parameters:
+        - name: actionType
+          in: query
+          schema:
+            type: string
+            enum: [CURATION_DECISION, ORG_VERIFICATION, PRIVACY_CONSENT, CAMPAIGN_PUBLISHED, AWARD_DECISION, ACCOUNT_STATUS]
+      responses:
+        '200':
+          description: Entrées du journal d'audit triées par ordre antéchronologique
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+
+# ==============================================================================
+# COMPOSANTS, PARAMÈTRES & SCHÉMAS DE DONNÉES (DTOs)
+# ==============================================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Jeton JWT émis par `/auth/login` contenant `sub` (userId) et `role` (`STUDENT`, `ORGANIZATION`, `CURATOR`, `ADMIN`).
+
+  parameters:
+    ScholarshipIdParam:
+      name: scholarshipId
+      in: path
+      required: true
+      description: Identifiant unique de la bourse (ex. `sch-1`)
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Requête invalide ou erreur de validation des champs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Jeton d'authentification manquant ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    # --- Énumérations métier ---
+    UserRole:
+      type: string
+      enum: [STUDENT, ORGANIZATION, CURATOR, ADMIN]
+
+    AcademicLevel:
+      type: string
+      description: Cycle ou diplôme académique normalisé
+      enum:
+        - Baccalauréat
+        - BTS
+        - DUT
+        - HND
+        - Licence
+        - Master
+        - Doctorat
+        - Formation professionnelle
+        - Formation complémentaire
+
+    StudyDomain:
+      type: string
+      description: Domaine disciplinaire de formation
+      enum:
+        - Informatique & Systèmes
+        - Génie Civil & Infrastructures
+        - Santé & Sciences Biomédicales
+        - Agronomie & Environnement
+        - Économie, Gestion & Finance
+        - Droit & Sciences Politiques
+        - Énergies Renouvelables & Mines
+        - Sciences de l’Éducation
+        - Tous domaines
+
+    FundingType:
+      type: string
+      enum:
+        - Bourse complète (Frais + Vie + Transport)
+        - Exonération des frais de scolarité
+        - Allocation mensuelle de subsistance
+        - Cofinancement / Bourse partielle
+        - Bourse de recherche & mobilité
+
+    GradingScale:
+      type: string
+      enum: [SUR_20, GPA_4, POURCENTAGE_100]
+
+    LanguageLevel:
+      type: string
+      enum: [A1, A2, B1, B2, C1, C2, Natif]
+
+    CurationStatus:
+      type: string
+      enum: [VERIFIED, PENDING_REVIEW, REJECTED, ARCHIVED]
+
+    ScholarshipStatus:
+      type: string
+      enum: [OPEN, CLOSING_SOON, EXPIRED, DRAFT]
+
+    EligibilityGlobalVerdict:
+      type: string
+      description: |
+        - `POTENTIALLY_COMPATIBLE` : Tous les critères obligatoires sont satisfaits et l'annonce est vérifiée.
+        - `TO_COMPLETE` : Aucun critère bloquant, mais au moins une information est manquante dans le profil étudiant (ex. certificat IELTS/TOEFL).
+        - `TO_VERIFY` : Condition académique ambiguë (ex. BTS/HND pour Licence) ou offre en attente de curation.
+        - `INCOMPATIBLE` : Au moins un critère obligatoire n'est pas respecté ou l'offre est expirée.
+      enum: [POTENTIALLY_COMPATIBLE, TO_COMPLETE, TO_VERIFY, INCOMPATIBLE]
+
+    CriterionEvaluationStatus:
+      type: string
+      enum: [SATISFIED, NOT_SATISFIED, MISSING_INFO, AMBIGUOUS_TO_VERIFY]
+
+    PlanTierId:
+      type: string
+      enum: [STUDENT_FREE, ORG_DISCOVERY, ORG_PRO, ORG_PREMIUM, ORG_SINGLE_CAMPAIGN]
+
+    ApplicationStatus:
+      type: string
+      enum:
+        - Candidature reçue
+        - En cours d’examen
+        - Présélectionnée
+        - Retenue
+        - Non retenue
+
+    # --- Entités Utilisateur & Authentification ---
+    UserAccount:
+      type: object
+      required: [id, fullName, email, role, active, createdAt, linkedEntityId]
+      properties:
+        id:
+          type: string
+          example: usr-stu-1
+        fullName:
+          type: string
+          example: Amina Ndongo
+        email:
+          type: string
+          format: email
+          example: amina.ndongo@etudiant.uy1.cm
+        role:
+          $ref: '#/components/schemas/UserRole'
+        active:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date
+          example: '2026-09-15'
+        linkedEntityId:
+          type: string
+          example: stu-1
+
+    RegisterStudentRequest:
+      type: object
+      required: [firstName, lastName, email, password, nationality, residenceCountry]
+      properties:
+        firstName:
+          type: string
+          example: Amina
+        lastName:
+          type: string
+          example: Ndongo
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        nationality:
+          type: string
+          example: Cameroun
+        residenceCountry:
+          type: string
+          example: Cameroun
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+
+    RegisterOrganizationRequest:
+      type: object
+      required: [officialName, type, country, contactEmail, contactPersonName, password, registrationNumber]
+      properties:
+        officialName:
+          type: string
+          example: Fondation Excellence Afrique & Coopération
+        type:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        country:
+          type: string
+          example: France
+        website:
+          type: string
+          format: uri
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        registrationNumber:
+          type: string
+          example: REG-COOP-2024-8891
+        password:
+          type: string
+          format: password
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          example: 3600
+        user:
+          $ref: '#/components/schemas/UserAccount'
+
+    # --- Profil Étudiant & Confidentialité ---
+    LanguageSkill:
+      type: object
+      required: [language, level]
+      properties:
+        language:
+          type: string
+          enum: [Français, Anglais, Allemand, Espagnol, Mandarin]
+        level:
+          $ref: '#/components/schemas/LanguageLevel'
+        certification:
+          type: string
+          nullable: true
+          example: IELTS Academic 6.5
+
+    StudentProfile:
+      type: object
+      required:
+        - id
+        - userId
+        - firstName
+        - lastName
+        - email
+        - isMinor
+        - nationality
+        - residenceCountry
+        - highestDiplomaObtained
+        - currentStudyLevel
+        - targetStudyLevel
+        - studyDomain
+        - gradingScale
+        - languages
+        - preferredDestinationCountries
+        - preferredFundingTypes
+        - institutionalVisibilityEnabled
+        - allowAcademicScoreSharing
+        - savedScholarshipIds
+        - updatedAt
+      properties:
+        id:
+          type: string
+          example: stu-1
+        userId:
+          type: string
+          example: usr-stu-1
+        firstName:
+          type: string
+          example: Amina
+        lastName:
+          type: string
+          example: Ndongo
+        email:
+          type: string
+          format: email
+        birthYear:
+          type: integer
+          example: 2003
+        isMinor:
+          type: boolean
+          example: false
+        guardianConsentVerified:
+          type: boolean
+          nullable: true
+        nationality:
+          type: string
+          example: Cameroun
+        residenceCountry:
+          type: string
+          example: Cameroun
+        city:
+          type: string
+          example: Yaoundé
+        highestDiplomaObtained:
+          allOf:
+            - $ref: '#/components/schemas/AcademicLevel'
+          description: 1. Le dernier diplôme déjà validé et obtenu par l'étudiant
+        highestDiplomaName:
+          type: string
+          example: Licence Scientifique en Génie Informatique
+        currentStudyLevel:
+          allOf:
+            - $ref: '#/components/schemas/AcademicLevel'
+          description: 2. Le cycle d'études dans lequel l'étudiant est inscrit cette année
+        targetStudyLevel:
+          allOf:
+            - $ref: '#/components/schemas/AcademicLevel'
+          description: 3. La formation visée pour laquelle l'étudiant recherche un financement
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        currentInstitution:
+          type: string
+          example: Université de Yaoundé I — Faculté des Sciences
+        academicYear:
+          type: string
+          example: 2026-2027
+        averageGrade:
+          type: number
+          format: float
+          nullable: true
+          example: 15.4
+        gradingScale:
+          $ref: '#/components/schemas/GradingScale'
+        normalizedGradeOut20:
+          type: number
+          format: float
+          nullable: true
+          example: 15.4
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+        preferredDestinationCountries:
+          type: array
+          items:
+            type: string
+          example: [France, Canada, Allemagne, Suisse]
+        preferredFundingTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingType'
+        institutionalVisibilityEnabled:
+          type: boolean
+          default: false
+          description: Privé (false) par défaut conformément à la Loi camerounaise n° 2024/017
+        visibilityConsentDate:
+          type: string
+          format: date
+          nullable: true
+        allowAcademicScoreSharing:
+          type: boolean
+          default: false
+        savedScholarshipIds:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+          format: date
+
+    UpdateStudentProfileRequest:
+      type: object
+      required: [firstName, lastName, nationality, residenceCountry]
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        city:
+          type: string
+        birthYear:
+          type: integer
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        highestDiplomaName:
+          type: string
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        currentInstitution:
+          type: string
+        academicYear:
+          type: string
+        averageGrade:
+          type: number
+          format: float
+          nullable: true
+        gradingScale:
+          $ref: '#/components/schemas/GradingScale'
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+        preferredDestinationCountries:
+          type: array
+          items:
+            type: string
+        preferredFundingTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingType'
+
+    PrivacyConsentUpdateRequest:
+      type: object
+      required: [institutionalVisibilityEnabled]
+      properties:
+        institutionalVisibilityEnabled:
+          type: boolean
+        allowAcademicScoreSharing:
+          type: boolean
+
+    # --- Bourses & Critères ---
+    ScholarshipCriteria:
+      type: object
+      required:
+        - eligibleNationalities
+        - requiredResidenceCountries
+        - requiredDiplomaObtained
+        - targetStudyLevels
+        - eligibleDomains
+        - requiresLanguageCertification
+      properties:
+        eligibleNationalities:
+          type: array
+          items:
+            type: string
+          example: [Cameroun, Sénégal, Côte d’Ivoire, Gabon]
+        requiredResidenceCountries:
+          type: array
+          items:
+            type: string
+          example: [Tous]
+        requiredDiplomaObtained:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        allowedCurrentLevels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        eligibleDomains:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudyDomain'
+        minGradeOut20:
+          type: number
+          format: float
+          nullable: true
+          example: 14.0
+        maxAge:
+          type: integer
+          nullable: true
+          example: 28
+        requiredLanguage:
+          type: string
+          enum: [Français, Anglais, Allemand]
+          nullable: true
+        minLanguageLevel:
+          $ref: '#/components/schemas/LanguageLevel'
+        requiresLanguageCertification:
+          type: boolean
+        specificConditions:
+          type: array
+          items:
+            type: string
+        preferentialCriteria:
+          type: array
+          items:
+            type: string
+
+    ModificationRecord:
+      type: object
+      required: [id, date, actorName, actorRole, summary]
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+          format: date
+        actorName:
+          type: string
+        actorRole:
+          $ref: '#/components/schemas/UserRole'
+        summary:
+          type: string
+
+    Scholarship:
+      type: object
+      required:
+        - id
+        - code
+        - title
+        - organizationId
+        - organizationName
+        - organizationType
+        - hostCountry
+        - fundingType
+        - financialSummary
+        - deadline
+        - startDate
+        - durationMonths
+        - description
+        - benefits
+        - requiredDocuments
+        - criteria
+        - sourceName
+        - sourceUrl
+        - retrievedAt
+        - curationStatus
+        - status
+        - modificationHistory
+      properties:
+        id:
+          type: string
+          example: sch-1
+        code:
+          type: string
+          example: DEMO-FEA-2027-01
+        title:
+          type: string
+          example: Bourse d’Excellence Scientifique & Numérique Cameroun-Europe
+        organizationId:
+          type: string
+          example: org-1
+        organizationName:
+          type: string
+          example: Fondation Excellence Afrique & Coopération
+        organizationType:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        hostCountry:
+          type: string
+          example: France
+        fundingType:
+          $ref: '#/components/schemas/FundingType'
+        financialSummary:
+          type: string
+          example: 850 000 FCFA / mois (1 300 €) + Frais de scolarité + Billet A/R
+        deadline:
+          type: string
+          format: date
+          example: '2027-03-30'
+        startDate:
+          type: string
+          format: date
+          example: '2027-09-15'
+        durationMonths:
+          type: integer
+          example: 24
+        slotsAvailable:
+          type: integer
+          nullable: true
+          example: 15
+        description:
+          type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        criteria:
+          $ref: '#/components/schemas/ScholarshipCriteria'
+        isDemoData:
+          type: boolean
+        sourceName:
+          type: string
+        sourceUrl:
+          type: string
+          format: uri
+        retrievedAt:
+          type: string
+          format: date
+        lastVerifiedAt:
+          type: string
+          format: date
+          nullable: true
+        verifiedByCurator:
+          type: string
+          nullable: true
+        curationStatus:
+          $ref: '#/components/schemas/CurationStatus'
+        status:
+          $ref: '#/components/schemas/ScholarshipStatus'
+        modificationHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModificationRecord'
+        duplicateSuspectOfId:
+          type: string
+          nullable: true
+
+    UpsertScholarshipRequest:
+      type: object
+      required:
+        - title
+        - hostCountry
+        - fundingType
+        - financialSummary
+        - deadline
+        - startDate
+        - durationMonths
+        - description
+        - benefits
+        - requiredDocuments
+        - criteria
+        - sourceName
+        - sourceUrl
+      properties:
+        title:
+          type: string
+        hostCountry:
+          type: string
+        fundingType:
+          $ref: '#/components/schemas/FundingType'
+        financialSummary:
+          type: string
+        deadline:
+          type: string
+          format: date
+        startDate:
+          type: string
+          format: date
+        durationMonths:
+          type: integer
+        slotsAvailable:
+          type: integer
+        description:
+          type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        criteria:
+          $ref: '#/components/schemas/ScholarshipCriteria'
+        sourceName:
+          type: string
+        sourceUrl:
+          type: string
+          format: uri
+
+    # --- Éligibilité & Recommandations ---
+    CriterionEvaluationItem:
+      type: object
+      required: [id, label, isMandatory, expectedValue, studentValue, status, explanation]
+      properties:
+        id:
+          type: string
+          example: crit-diploma-obtained
+        label:
+          type: string
+          example: Diplôme déjà obtenu exigé
+        isMandatory:
+          type: boolean
+          example: true
+        expectedValue:
+          type: string
+          example: Licence
+        studentValue:
+          type: string
+          example: Licence
+        status:
+          $ref: '#/components/schemas/CriterionEvaluationStatus'
+        explanation:
+          type: string
+          example: Votre dernier diplôme obtenu (Licence) figure parmi les diplômes requis.
+        missingFieldKey:
+          type: string
+          nullable: true
+
+    EligibilityReport:
+      type: object
+      required:
+        - scholarshipId
+        - studentId
+        - evaluatedAt
+        - verdict
+        - verdictLabel
+        - summaryExplanation
+        - legalDisclaimer
+        - satisfiedCount
+        - totalMandatoryCount
+        - items
+        - warnings
+      properties:
+        scholarshipId:
+          type: string
+        studentId:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date
+        verdict:
+          $ref: '#/components/schemas/EligibilityGlobalVerdict'
+        verdictLabel:
+          type: string
+          enum: [Potentiellement compatible, À compléter, À vérifier, Incompatible]
+        summaryExplanation:
+          type: string
+        legalDisclaimer:
+          type: string
+          example: Ce résultat repose sur une comparaison automatisée des critères déclarés. Un statut « Potentiellement compatible » ne constitue en aucun cas une garantie d'admission ou d'attribution de bourse.
+        satisfiedCount:
+          type: integer
+          example: 9
+        totalMandatoryCount:
+          type: integer
+          example: 9
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionEvaluationItem'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    EvaluatedScholarshipItem:
+      type: object
+      required: [scholarship, report]
+      properties:
+        scholarship:
+          $ref: '#/components/schemas/Scholarship'
+        report:
+          $ref: '#/components/schemas/EligibilityReport'
+
+    RecommendationItem:
+      type: object
+      required: [scholarship, report, reasons, preferenceScore]
+      properties:
+        scholarship:
+          $ref: '#/components/schemas/Scholarship'
+        report:
+          $ref: '#/components/schemas/EligibilityReport'
+        reasons:
+          type: array
+          description: Motifs explicites justifiant pourquoi cette bourse est recommandée à l'étudiant
+          items:
+            type: string
+          example:
+            - Diplôme requis validé (Licence)
+            - Finance ton objectif (Master)
+            - Cible ta filière (Informatique & Systèmes)
+            - Destination souhaitée (France)
+        preferenceScore:
+          type: integer
+          example: 5
+
+    RecommendationsResponse:
+      type: object
+      required: [appliedCriteriaSummary, strongMatches, toCompleteOrVerify]
+      properties:
+        appliedCriteriaSummary:
+          type: object
+          properties:
+            highestDiplomaObtained:
+              $ref: '#/components/schemas/AcademicLevel'
+            targetStudyLevel:
+              $ref: '#/components/schemas/AcademicLevel'
+            studyDomain:
+              $ref: '#/components/schemas/StudyDomain'
+            preferredDestinationCountries:
+              type: array
+              items:
+                type: string
+        strongMatches:
+          type: array
+          description: Bourses à forte pertinence (tous critères académiques validés et annonce vérifiée)
+          items:
+            $ref: '#/components/schemas/RecommendationItem'
+        toCompleteOrVerify:
+          type: array
+          description: Bourses correspondant au parcours et à la filière mais nécessitant un complément ou une vérification
+          items:
+            $ref: '#/components/schemas/RecommendationItem'
+
+    # --- Invitations, Candidatures & Vivier Anonymisé ---
+    AnonymizedCandidateProfile:
+      type: object
+      required:
+        - studentId
+        - anonymizedCode
+        - highestDiplomaObtained
+        - currentStudyLevel
+        - targetStudyLevel
+        - studyDomain
+        - nationality
+        - residenceCountry
+        - languages
+      properties:
+        studentId:
+          type: string
+        anonymizedCode:
+          type: string
+          example: CAND-CM-2026-01
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        normalizedGradeOut20:
+          type: number
+          format: float
+          nullable: true
+          description: Présent uniquement si `allowAcademicScoreSharing = true`
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+
+    Invitation:
+      type: object
+      required:
+        - id
+        - organizationId
+        - organizationName
+        - scholarshipId
+        - scholarshipTitle
+        - studentId
+        - studentAnonymizedCode
+        - message
+        - sentAt
+        - status
+        - consentToShareDossier
+      properties:
+        id:
+          type: string
+          example: inv-1
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        scholarshipId:
+          type: string
+        scholarshipTitle:
+          type: string
+        studentId:
+          type: string
+        studentAnonymizedCode:
+          type: string
+          example: CAND-CM-2026-01
+        studentDisplayName:
+          type: string
+          description: Divulgué à l'organisme uniquement après acceptation et consentement de l'étudiant
+        message:
+          type: string
+        sentAt:
+          type: string
+          format: date
+        respondedAt:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, ACCEPTED, DECLINED]
+        studentResponseNote:
+          type: string
+          nullable: true
+        consentToShareDossier:
+          type: boolean
+
+    SendInvitationRequest:
+      type: object
+      required: [studentId, scholarshipId, message]
+      properties:
+        studentId:
+          type: string
+        scholarshipId:
+          type: string
+        message:
+          type: string
+
+    RespondInvitationRequest:
+      type: object
+      required: [accept]
+      properties:
+        accept:
+          type: boolean
+        note:
+          type: string
+
+    ApplicationRecord:
+      type: object
+      required:
+        - id
+        - referenceCode
+        - scholarshipId
+        - scholarshipTitle
+        - organizationId
+        - organizationName
+        - studentId
+        - studentName
+        - studentHighestDiploma
+        - studentCurrentLevel
+        - studentTargetLevel
+        - studentDomain
+        - studentNationality
+        - submittedAt
+        - updatedAt
+        - status
+        - evaluatorNotes
+      properties:
+        id:
+          type: string
+        referenceCode:
+          type: string
+          example: DOS-2027-4812
+        scholarshipId:
+          type: string
+        scholarshipTitle:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        studentId:
+          type: string
+        studentName:
+          type: string
+        studentHighestDiploma:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentCurrentLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentTargetLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        studentGradeOut20:
+          type: number
+          format: float
+          nullable: true
+        studentNationality:
+          type: string
+        submittedAt:
+          type: string
+          format: date
+        updatedAt:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/ApplicationStatus'
+        evaluatorNotes:
+          type: string
+        evaluatorScoreOut100:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        decisionRecordedAt:
+          type: string
+          format: date
+          nullable: true
+        decisionJustification:
+          type: string
+          nullable: true
+        originatedFromInvitationId:
+          type: string
+          nullable: true
+
+    SubmitApplicationRequest:
+      type: object
+      required: [scholarshipId]
+      properties:
+        scholarshipId:
+          type: string
+        motivationNote:
+          type: string
+
+    EvaluateApplicationRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ApplicationStatus'
+        evaluatorNotes:
+          type: string
+        evaluatorScoreOut100:
+          type: integer
+          minimum: 0
+          maximum: 100
+        decisionJustification:
+          type: string
+
+    # --- Organisme, Évaluateurs & Abonnements B2B ---
+    EvaluatorMember:
+      type: object
+      required: [id, name, email, roleTitle, permissionLevel, active]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roleTitle:
+          type: string
+        permissionLevel:
+          type: string
+          enum: [LECTURE_SEULE, EVALUATION_DOSSIERS, DECISION_FINALE]
+        active:
+          type: boolean
+
+    AddEvaluatorRequest:
+      type: object
+      required: [name, email, roleTitle, permissionLevel]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roleTitle:
+          type: string
+        permissionLevel:
+          type: string
+          enum: [LECTURE_SEULE, EVALUATION_DOSSIERS, DECISION_FINALE]
+
+    OrganizationProfile:
+      type: object
+      required:
+        - id
+        - userId
+        - officialName
+        - type
+        - country
+        - contactEmail
+        - contactPersonName
+        - registrationNumber
+        - isVerified
+        - verificationStatus
+        - activePlan
+        - evaluators
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        officialName:
+          type: string
+        type:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        country:
+          type: string
+        address:
+          type: string
+        website:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        description:
+          type: string
+        registrationNumber:
+          type: string
+        isVerified:
+          type: boolean
+        verificationStatus:
+          type: string
+          enum: [VERIFIED, PENDING, SUSPENDED, REJECTED]
+        verifiedAt:
+          type: string
+          format: date
+          nullable: true
+        activePlan:
+          $ref: '#/components/schemas/PlanTierId'
+        evaluators:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluatorMember'
+
+    UpdateOrganizationProfileRequest:
+      type: object
+      properties:
+        officialName:
+          type: string
+        address:
+          type: string
+        website:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        description:
+          type: string
+
+    CommercialSubscription:
+      type: object
+      required:
+        - id
+        - organizationId
+        - organizationName
+        - planId
+        - planName
+        - amountFcfa
+        - billingCycle
+        - status
+        - startedAt
+      properties:
+        id:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        planId:
+          $ref: '#/components/schemas/PlanTierId'
+        planName:
+          type: string
+          example: Organisme Pro
+        amountFcfa:
+          type: integer
+          example: 50000
+        billingCycle:
+          type: string
+          enum: [Mensuel, Campagne ponctuelle, Gratuit]
+        status:
+          type: string
+          enum: [ACTIF_SIMULE, EN_ATTENTE_SIMULE, EXPIRE]
+        startedAt:
+          type: string
+          format: date
+        nextRenewalAt:
+          type: string
+          format: date
+          nullable: true
+
+    # --- Curation, Sources, Doublons, Notifications & Audit ---
+    CurateScholarshipRequest:
+      type: object
+      required: [curationStatus]
+      properties:
+        curationStatus:
+          $ref: '#/components/schemas/CurationStatus'
+        summaryNote:
+          type: string
+        updatedFields:
+          $ref: '#/components/schemas/UpsertScholarshipRequest'
+
+    OfficialSource:
+      type: object
+      required:
+        - id
+        - name
+        - institutionType
+        - country
+        - officialUrl
+        - reliabilityStatus
+        - lastCheckedAt
+        - activeAnnouncementsCount
+        - notes
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        institutionType:
+          type: string
+        country:
+          type: string
+        officialUrl:
+          type: string
+          format: uri
+        reliabilityStatus:
+          type: string
+          enum: [FIABLE, A_SURVEILLER, SUSPECTE]
+        lastCheckedAt:
+          type: string
+          format: date
+        activeAnnouncementsCount:
+          type: integer
+        notes:
+          type: string
+
+    DuplicateCandidate:
+      type: object
+      required:
+        - id
+        - primaryScholarshipId
+        - duplicateScholarshipId
+        - similarityScore
+        - detectedReasons
+        - status
+      properties:
+        id:
+          type: string
+        primaryScholarshipId:
+          type: string
+        duplicateScholarshipId:
+          type: string
+        similarityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        detectedReasons:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [PENDING, MERGED_ARCHIVED, DISMISSED]
+
+    AppNotification:
+      type: object
+      required: [id, userId, role, category, title, message, createdAt, read, linkTo]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        category:
+          type: string
+          enum: [DEADLINE, INVITATION, NEW_SCHOLARSHIP, CURATION, SYSTEM]
+        title:
+          type: string
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date
+        read:
+          type: boolean
+        linkTo:
+          type: string
+
+    AuditLogEntry:
+      type: object
+      required: [id, timestamp, actorName, actorRole, actionType, targetLabel, details]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          example: '2026-11-23 14:30'
+        actorName:
+          type: string
+        actorRole:
+          $ref: '#/components/schemas/UserRole'
+        actionType:
+          type: string
+          enum:
+            - CURATION_DECISION
+            - ORG_VERIFICATION
+            - PRIVACY_CONSENT
+            - CAMPAIGN_PUBLISHED
+            - AWARD_DECISION
+            - ACCOUNT_STATUS
+        targetLabel:
+          type: string
+        details:
+          type: string
+
+    ApiError:
+      type: object
+      required: [timestamp, status, error, message, path]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: Bad Request
+        message:
+          type: string
+        path:
+          type: string

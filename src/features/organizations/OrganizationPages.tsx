@@ -720,20 +720,22 @@ export const CreateCampaignPage: React.FC = () => {
         preferentialCriteria: [],
       },
       isDemoData: true,
-      sourceName: `${currentOrganization.officialName} (Publication directe)`,
+      sourceName: `${currentOrganization.officialName} (Soumission directe organisme)`,
       sourceUrl: currentOrganization.website,
-      retrievedAt: '2026-11-23',
-      lastVerifiedAt: '2026-11-23',
-      verifiedByCurator: 'Publication institutionnelle vérifiée',
-      curationStatus: 'VERIFIED',
+      retrievedAt: '2026-11-24',
+      lastVerifiedAt: null,
+      curationStatus: 'PENDING_REVIEW',
+      publicationStatus: 'PENDING_REVIEW',
+      acquisitionChannel: 'ORGANIZATION_SUBMISSION',
       status: 'OPEN',
       modificationHistory: [
         {
           id: `mod-${Date.now()}`,
-          date: '2026-11-23',
+          date: '2026-11-24',
           actorName: currentOrganization.contactPersonName,
           actorRole: 'ORGANIZATION',
-          summary: 'Création et publication de la campagne de bourse.',
+          summary:
+            'Soumission de la campagne de bourse par l’organisme (en attente de validation par un curateur avant publication publique).',
         },
       ],
     };
@@ -1158,20 +1160,23 @@ export const OrganizationCandidateSearchPage: React.FC = () => {
             </div>
           </Panel>
 
-          {/* Résultats anonymisés */}
+          {/* Résultats pseudonymisés (OpenAPI 1.1 : candidatePublicId opaque, sans ville ni coordonnées personnelles) */}
           <div className="space-y-4">
             {visibleStudents.map((stu) => {
               const anonCode = `CAND-CM-2026-0${stu.id.replace('stu-', '')}`;
+              const candidatePublicId = `CAND-PUB-2026-${stu.id
+                .replace(/[^a-zA-Z0-9]/g, '')
+                .toUpperCase()}`;
               return (
                 <Panel
-                  key={stu.id}
+                  key={candidatePublicId}
                   title={`Profil Candidat Volontaire · Réf. ${anonCode}`}
-                  subtitle={`Nationalité : ${stu.nationality} · Résidence : ${stu.residenceCountry} (${stu.city}) · Consentement accordé le ${stu.visibilityConsentDate || '2026-10-15'}`}
+                  subtitle={`Jeton public : ${candidatePublicId} · Nationalité : ${stu.nationality} · Résidence : ${stu.residenceCountry} · Consentement accordé le ${stu.visibilityConsentDate || '2026-10-15'}`}
                   headerRight={
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => setInvitingStudentId(stu.id)}
+                      onClick={() => setInvitingStudentId(candidatePublicId)}
                     >
                       <MailOpen className="w-3.5 h-3.5" />
                       Inviter à postuler
@@ -1850,8 +1855,13 @@ export const OrganizationStatisticsPage: React.FC = () => {
 };
 
 export const OrganizationBillingPage: React.FC = () => {
-  const { currentOrganization, subscriptions, changeOrganizationPlan } =
-    useApp();
+  const {
+    currentOrganization,
+    subscriptions,
+    subscriptionRequests,
+    changeOrganizationPlan,
+    requestOrganizationPlanChange,
+  } = useApp();
 
   const plans: {
     id: PlanTierId;
@@ -1888,13 +1898,16 @@ export const OrganizationBillingPage: React.FC = () => {
   const mySubs = subscriptions.filter(
     (s) => s.organizationId === currentOrganization.id
   );
+  const myRequests = (subscriptionRequests || []).filter(
+    (r) => r.organizationId === currentOrganization.id
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="MODÈLE B2B2C (SOUSCRIPTIONS SIMULÉES)"
+        kicker="MODÈLE B2B2C (SOUSCRIPTIONS SIMULÉES — OPENAPI 1.1)"
         title="Abonnement et facturation institutionnelle"
-        subtitle="Ces tarifs sont des hypothèses commerciales destinées à la démonstration. Aucun paiement réel n’est effectué."
+        subtitle="Ces tarifs sont des hypothèses commerciales destinées à la démonstration. Conformément au contrat OpenAPI 1.1, une demande de changement de plan est soumise à validation administrative (ou simulable en mode Sandbox)."
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1907,23 +1920,63 @@ export const OrganizationBillingPage: React.FC = () => {
               subtitle={p.price}
               className={isCurrent ? 'border-[#203454] bg-[#3457D5]/10/30' : ''}
             >
-              <div className="space-y-4 text-xs">
+              <div className="space-y-3 text-xs">
                 <p className="text-[#69768C]">{p.desc}</p>
-                <Button
-                  variant={isCurrent ? 'primary' : 'secondary'}
-                  size="sm"
-                  className="w-full"
-                  onClick={() =>
-                    changeOrganizationPlan(currentOrganization.id, p.id)
-                  }
-                >
-                  {isCurrent ? 'Formule active' : 'Simuler cette formule'}
-                </Button>
+                <div className="space-y-1.5">
+                  <Button
+                    variant={isCurrent ? 'primary' : 'secondary'}
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      requestOrganizationPlanChange(currentOrganization.id, p.id)
+                    }
+                  >
+                    {isCurrent
+                      ? 'Formule active'
+                      : 'Demander cette formule (v1.1)'}
+                  </Button>
+                  {!isCurrent && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={() =>
+                        changeOrganizationPlan(currentOrganization.id, p.id)
+                      }
+                    >
+                      Simuler en Sandbox immédiat
+                    </Button>
+                  )}
+                </div>
               </div>
             </Panel>
           );
         })}
       </div>
+
+      {myRequests.length > 0 && (
+        <Panel
+          title="Demandes de changement de formule (/organizations/me/subscription/requests)"
+          subtitle="Aucune fonctionnalité payante n’est activée sans confirmation serveur ou validation admin"
+        >
+          <div className="divide-y divide-[#E6ECF5] text-xs">
+            {myRequests.map((req) => (
+              <div
+                key={req.id}
+                className="py-2.5 flex flex-wrap items-center justify-between gap-2"
+              >
+                <div>
+                  <strong className="text-[#203454]">{req.requestedPlan}</strong>{' '}
+                  · <span className="text-[#69768C]">{req.requestNote}</span>
+                </div>
+                <div className="font-mono tabular-nums">
+                  Statut : <strong>{req.status}</strong> ({req.requestedAt.slice(0, 10)})
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       <Panel title="Historique des souscriptions simulées">
         <div className="divide-y divide-[#E6ECF5] text-xs">

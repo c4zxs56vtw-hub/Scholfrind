@@ -1,0 +1,4072 @@
+openapi: 3.0.3
+info:
+  title: SCHOLARFIND B2B2C REST API
+  version: 1.1.0
+  description: |
+    Contrat d'interface OpenAPI 3.0 complet de la plateforme **SCHOLARFIND** (Système automatisé de recherche, de recommandation explicable, de vérification d'éligibilité aux bourses d'études et de mise en relation B2B2C).
+
+    ### Architecture & Conformité
+    - **Backend cible** : Java 21 / Spring Boot 3.x + Spring Security (JWT + RBAC) + PostgreSQL.
+    - **Distinction académique stricte** : Le schéma distingue systématiquement les 3 niveaux académiques (`highestDiplomaObtained`, `currentStudyLevel`, `targetStudyLevel`).
+    - **Moteur d'éligibilité déterministe & explicable** : Évalue 9 critères obligatoires, normalise les moyennes (`SUR_20`, `GPA_4`, `POURCENTAGE_100` vers `/20`) et retourne l'un des 4 verdicts (`POTENTIALLY_COMPATIBLE`, `TO_COMPLETE`, `TO_VERIFY`, `INCOMPATIBLE`).
+    - **Protection des données personnelles (Loi camerounaise n° 2024/017 du 23 décembre 2024)** :
+      - Profil étudiant privé par défaut (`institutionalVisibilityEnabled: false`).
+      - Anonymisation des profils visibles dans le vivier organisme (`CAND-CM-YYYY-XXXX`).
+      - Consentement spécifique horodaté requis avant tout partage de dossier suite à une invitation.
+
+
+        ### Additive v1.1 frontend handoff (proposed, not deployed)
+        - Existing v1.0 endpoints, operationIds and wire-format values remain available.
+        - New /admin/scholarships endpoints let admins create and publish records.
+        - New AI/ingestion endpoints orchestrate Gemini through the backend only.
+        - New paged search is opt-in: legacy GET /scholarships still returns an array.
+        - Academic visibility is opt-in; candidate discovery uses opaque public identifiers.
+        - An AI extraction is an untrusted draft requiring validation and human review.
+        - Contract describes a future API; it is NOT evidence that a backend is running.
+  contact:
+    name: Équipe Architecture SCHOLARFIND
+    email: api@scholarfind.cm
+
+servers:
+- url: https://api.scholarfind.cm/api/v1
+  description: Target production URL (illustrative, not confirmed deployed)
+- url: http://localhost:8080/api/v1
+  description: Local Spring Boot development target (not yet deployed)
+
+tags:
+- name: Auth
+  description: Authentification JWT, inscription étudiant/organisme et session courante
+- name: Scholarships
+  description: Catalogue public des bourses, recherche multicritère et détails vérifiés
+- name: Students
+  description: Gestion du profil académique, consentement de visibilité (Loi n° 2024/017), favoris et 
+    recommandations
+- name: Eligibility
+  description: Moteur déterministe d'évaluation et d'explicabilité d'éligibilité critère par critère
+- name: Invitations & Applications
+  description: Invitations institutionnelles, consentement de partage de dossier et suivi des 
+    candidatures
+- name: Organizations
+  description: Gestion de l'organisme financeur, campagnes de bourses, vivier de candidats anonymisés, 
+    équipe d'évaluateurs et abonnements B2B
+- name: Curation
+  description: Vérification documentaire des bourses, fiabilité des sources officielles et résolution des
+    doublons
+- name: Admin
+  description: Gouvernance de la plateforme, vérification des organismes, gestion des comptes et journal 
+    d'audit
+
+- name: AdminScholarships
+  description: Manual scholarship drafts, editorial workflow and publication
+- name: AI
+  description: Gemini-backed extraction and provenance review through backend only
+- name: Ingestion
+  description: Asynchronous retrieval and import jobs
+- name: Dashboard
+  description: Read-only aggregated dashboards
+- name: AcademicRecords
+  description: Student educational history with multiple diplomas
+- name: Plans
+  description: Public professional plans and organization subscription requests
+- name: Campaigns
+  description: Organization campaign cycles separate from scholarship programs
+security:
+- bearerAuth: []
+
+paths:
+  # ============================================================================
+  # 1. AUTHENTIFICATION & COMPTES (/auth)
+  # ============================================================================
+  /auth/register/student:
+    post:
+      tags: [Auth]
+      summary: Inscription d'un nouvel étudiant (100 % gratuit, profil privé par défaut)
+      operationId: registerStudent
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterStudentRequest'
+      responses:
+        '201':
+          description: Compte étudiant créé avec succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Adresse e-mail déjà utilisée
+
+  /auth/register/organization:
+    post:
+      tags: [Auth]
+      summary: Demande d'ouverture de compte pour un organisme financeur (soumis à vérification)
+      operationId: registerOrganization
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterOrganizationRequest'
+      responses:
+        '201':
+          description: Compte organisme créé en statut PENDING (en attente de vérification 
+            administrative)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authentification par e-mail et mot de passe (retourne un jeton JWT)
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentification réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Récupère le compte utilisateur connecté et son entité liée (Étudiant ou Organisme)
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Profil de session courant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 2. CATALOGUE PUBLIC DES BOURSES (/scholarships)
+  # ============================================================================
+      x-required-roles:
+      - STUDENT
+      - ORGANIZATION
+      - CURATOR
+      - ADMIN
+  /scholarships:
+    get:
+      tags: [Scholarships]
+      summary: Recherche et filtrage multicritère dans le catalogue des bourses
+      operationId: searchScholarships
+      security: []
+      parameters:
+      - name: q
+        in: query
+        description: Mot-clé (titre, organisme, pays, description)
+        schema:
+          type: string
+      - name: targetLevel
+        in: query
+        description: Niveau d'études financé recherché
+        schema:
+          $ref: '#/components/schemas/AcademicLevel'
+      - name: requiredDiploma
+        in: query
+        description: Dernier diplôme déjà obtenu par le candidat
+        schema:
+          $ref: '#/components/schemas/AcademicLevel'
+      - name: domain
+        in: query
+        description: Domaine de formation éligible
+        schema:
+          $ref: '#/components/schemas/StudyDomain'
+      - name: hostCountry
+        in: query
+        description: Pays d'accueil de la bourse
+        schema:
+          type: string
+      - name: fundingType
+        in: query
+        description: Type de couverture financière
+        schema:
+          $ref: '#/components/schemas/FundingType'
+      - name: includeExpired
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: onlyVerified
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: sortBy
+        in: query
+        schema:
+          type: string
+          enum: [DEADLINE_ASC, MIN_GRADE_ASC, RECENTLY_VERIFIED]
+          default: DEADLINE_ASC
+      responses:
+        '200':
+          description: Liste des bourses correspondant aux critères
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scholarship'
+
+  /scholarships/{scholarshipId}:
+    get:
+      tags: [Scholarships]
+      summary: Consulte la fiche détaillée d'une bourse (critères, financement, pièces, traçabilité 
+        source)
+      operationId: getScholarshipById
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Fiche complète du programme de bourse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # 3. ESPACE ÉTUDIANT : PROFIL, CONFIDENTIALITÉ, FAVORIS & RECOMMANDATIONS
+  # ============================================================================
+  /students/me/profile:
+    get:
+      tags: [Students]
+      summary: "Consulte le profil complet de l'étudiant connecté (3 sections : Identité, Parcours académique,
+        Projet d'études)"
+      operationId: getMyStudentProfile
+      responses:
+        '200':
+          description: Profil académique et personnel de l'étudiant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+      x-required-roles:
+      - STUDENT
+    put:
+      tags: [Students]
+      summary: Met à jour le profil étudiant et recalcule automatiquement la moyenne normalisée sur 20
+      operationId: updateMyStudentProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: Profil mis à jour avec `normalizedGradeOut20` recalculé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+
+      x-required-roles:
+      - STUDENT
+  /students/me/privacy:
+    patch:
+      tags: [Students]
+      summary: Active ou révoque la visibilité institutionnelle du profil (Loi camerounaise n° 2024/017)
+      operationId: updateStudentPrivacyConsent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrivacyConsentUpdateRequest'
+      responses:
+        '200':
+          description: Paramètres de confidentialité mis à jour et journalisés dans l'audit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentProfile'
+
+      x-required-roles:
+      - STUDENT
+  /students/me/favorites:
+    get:
+      tags: [Students]
+      summary: Liste les bourses enregistrées dans les favoris de l'étudiant avec leur rapport 
+        d'éligibilité
+      operationId: getMyFavoriteScholarships
+      responses:
+        '200':
+          description: Liste des bourses favorites triées par échéance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvaluatedScholarshipItem'
+
+  /students/me/favorites/{scholarshipId}:
+    post:
+      tags: [Students]
+      summary: Ajoute une bourse aux favoris de l'étudiant
+      operationId: addFavoriteScholarship
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Identifiants des bourses favorites mis à jour
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+    delete:
+      tags: [Students]
+      summary: Retire une bourse des favoris de l'étudiant
+      operationId: removeFavoriteScholarship
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Identifiants des bourses favorites mis à jour
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /students/me/recommendations:
+    get:
+      tags: [Students]
+      summary: Récupère les recommandations personnalisées de bourses basées sur le parcours académique 
+        et le domaine
+      operationId: getMyRecommendations
+      responses:
+        '200':
+          description: Recommandations structurées en 2 groupes (Forte pertinence vs À 
+            compléter/vérifier) avec motifs explicites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationsResponse'
+
+  # ============================================================================
+  # 4. MOTEUR D'ÉLIGIBILITÉ EXPLICABLE (/eligibility)
+  # ============================================================================
+      x-required-roles:
+      - STUDENT
+  /eligibility/evaluate/{scholarshipId}:
+    get:
+      tags: [Eligibility]
+      summary: Évalue l'éligibilité de l'étudiant connecté pour une bourse donnée (critère par critère)
+      operationId: evaluateEligibilityForCurrentStudent
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Rapport d'éligibilité détaillé sur les 9 critères obligatoires avec mention légale
+            de non-garantie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityReport'
+
+      x-required-roles:
+      - STUDENT
+  /eligibility/simulate:
+    post:
+      tags: [Eligibility]
+      summary: Simule un rapport d'éligibilité à partir d'un profil candidat hypothétique et d'une bourse
+      operationId: simulateEligibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scholarshipId, studentProfile]
+              properties:
+                scholarshipId:
+                  type: string
+                studentProfile:
+                  $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: Rapport d'éligibilité simulé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityReport'
+
+  # ============================================================================
+  # 5. INVITATIONS, CANDIDATURES & NOTIFICATIONS
+  # ============================================================================
+  /students/me/invitations:
+    get:
+      tags: [Invitations & Applications]
+      summary: Liste les invitations reçues par l'étudiant de la part d'organismes financeurs vérifiés
+      operationId: getMyStudentInvitations
+      responses:
+        '200':
+          description: Liste des invitations reçues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+
+  /students/me/invitations/{invitationId}/respond:
+    post:
+      tags: [Invitations & Applications]
+      summary: Accepte (avec consentement explicite de partage du dossier) ou décline une invitation
+      operationId: respondToInvitation
+      parameters:
+      - name: invitationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespondInvitationRequest'
+      responses:
+        '200':
+          description: Invitation mise à jour (et candidature créée si acceptée)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+
+  /students/me/applications:
+    get:
+      tags: [Invitations & Applications]
+      summary: Liste les candidatures soumises par l'étudiant et leur statut d'évaluation
+      operationId: getMyApplications
+      responses:
+        '200':
+          description: Liste des dossiers de candidature de l'étudiant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationRecord'
+    post:
+      tags: [Invitations & Applications]
+      summary: Soumet un dossier de candidature à un programme de bourse
+      operationId: submitApplication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitApplicationRequest'
+      responses:
+        '201':
+          description: Dossier de candidature créé et transmis à l'organisme
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+
+  /notifications:
+    get:
+      tags: [Invitations & Applications]
+      summary: Récupère les notifications de l'utilisateur connecté
+      operationId: getMyNotifications
+      responses:
+        '200':
+          description: Liste des notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AppNotification'
+
+  /notifications/{notificationId}/read:
+    patch:
+      tags: [Invitations & Applications]
+      summary: Marque une notification comme lue
+      operationId: markNotificationRead
+      parameters:
+      - name: notificationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Notification marquée comme lue
+
+  /notifications/read-all:
+    post:
+      tags: [Invitations & Applications]
+      summary: Marque toutes les notifications de l'utilisateur comme lues
+      operationId: markAllNotificationsRead
+      responses:
+        '204':
+          description: Toutes les notifications ont été marquées comme lues
+
+  # ============================================================================
+  # 6. ESPACE ORGANISME FINANCEUR (/organizations)
+  # ============================================================================
+  /organizations/me:
+    get:
+      tags: [Organizations]
+      summary: Récupère le profil institutionnel de l'organisme connecté, son plan actif et ses 
+        évaluateurs
+      operationId: getMyOrganizationProfile
+      responses:
+        '200':
+          description: Profil complet de l'organisme financeur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+    put:
+      tags: [Organizations]
+      summary: Met à jour les informations institutionnelles de l'organisme
+      operationId: updateMyOrganizationProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationProfileRequest'
+      responses:
+        '200':
+          description: Profil organisme mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+
+  /organizations/me/scholarships:
+    get:
+      tags: [Organizations]
+      summary: Liste les campagnes de bourses créées par l'organisme connecté
+      operationId: getOrganizationScholarships
+      responses:
+        '200':
+          description: Liste des campagnes de l'organisme
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scholarship'
+    post:
+      tags: [Organizations]
+      summary: Create an organization scholarship submission, pending curation (never auto-published)
+      operationId: createOrganizationScholarship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertScholarshipRequest'
+      responses:
+        '201':
+          description: Campagne créée et soumise à la curation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+      description: New submission becomes draft or pending review; publication requires approval.
+      x-required-roles:
+      - ORGANIZATION
+  /organizations/me/scholarships/{scholarshipId}:
+    put:
+      tags: [Organizations]
+      summary: Modifie les paramètres ou critères d'une campagne de bourse existante
+      operationId: updateOrganizationScholarship
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertScholarshipRequest'
+      responses:
+        '200':
+          description: Campagne mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+    get:
+      tags:
+      - Organizations
+      summary: Get own submitted scholarship details
+      operationId: getOrganizationScholarship
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - &id001
+        $ref: '#/components/parameters/ScholarshipIdParam'
+      responses:
+        '200':
+          description: Get own submitted scholarship details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /organizations/me/talent-pool:
+    get:
+      tags: [Organizations]
+      summary: Recherche dans le vivier de candidats anonymisés ayant activé leur visibilité 
+        institutionnelle
+      operationId: searchAnonymizedTalentPool
+      parameters:
+      - name: scholarshipId
+        in: query
+        schema:
+          type: string
+      - name: targetLevel
+        in: query
+        schema:
+          $ref: '#/components/schemas/AcademicLevel'
+      - name: domain
+        in: query
+        schema:
+          $ref: '#/components/schemas/StudyDomain'
+      - name: minGradeOut20
+        in: query
+        schema:
+          type: number
+          format: float
+      responses:
+        '200':
+          description: Liste des profils étudiants anonymisés éligibles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnonymizedCandidateProfile'
+
+      x-required-roles:
+      - ORGANIZATION
+  /organizations/me/invitations:
+    post:
+      tags: [Organizations]
+      summary: Envoie une invitation à candidater à un profil étudiant ayant activé sa visibilité
+      operationId: sendInvitationToStudent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendInvitationRequest'
+      responses:
+        '201':
+          description: Invitation transmise et notification envoyée à l'étudiant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '403':
+          description: Action refusée (profil étudiant privé ou organisme non vérifié)
+
+      x-required-roles:
+      - ORGANIZATION
+    get:
+      tags:
+      - Organizations
+      summary: List invitations sent by own verified organization
+      operationId: getOrganizationSentInvitations
+      x-required-roles:
+      - ORGANIZATION
+      responses:
+        '200':
+          description: List invitations sent by own verified organization
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /organizations/me/applications:
+    get:
+      tags: [Organizations]
+      summary: Liste les dossiers de candidature reçus pour les campagnes de l'organisme
+      operationId: getOrganizationApplications
+      parameters:
+      - name: scholarshipId
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/ApplicationStatus'
+      responses:
+        '200':
+          description: Liste des candidatures reçues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationRecord'
+
+  /organizations/me/applications/{applicationId}/evaluate:
+    patch:
+      tags: [Organizations]
+      summary: Met à jour le statut, la note d'évaluation (/100) et la décision motivée d'une candidature
+      operationId: evaluateApplication
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateApplicationRequest'
+      responses:
+        '200':
+          description: Dossier de candidature mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+
+  /organizations/me/evaluators:
+    post:
+      tags: [Organizations]
+      summary: Ajoute un collaborateur évaluateur à l'équipe de l'organisme
+      operationId: addOrganizationEvaluator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddEvaluatorRequest'
+      responses:
+        '201':
+          description: Collaborateur ajouté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluatorMember'
+
+  /organizations/me/subscription:
+    get:
+      tags: [Organizations]
+      summary: Consulte l'abonnement B2B actif de l'organisme financeur
+      operationId: getOrganizationSubscription
+      responses:
+        '200':
+          description: Détails de l'abonnement commercial
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialSubscription'
+    put:
+      tags: [Organizations]
+      summary: Change la formule d'abonnement B2B de l'organisme (Découverte, Pro, Premium, Campagne 
+        ponctuelle)
+      operationId: changeOrganizationPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId:
+                  $ref: '#/components/schemas/PlanTierId'
+      responses:
+        '200':
+          description: Abonnement mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialSubscription'
+
+  # ============================================================================
+  # 7. ESPACE CURATEUR (/curation)
+  # ============================================================================
+      description: Legacy sandbox simulation only. Never unlock paid entitlements solely from this client
+        request. New integration should use /organizations/me/subscription/requests.
+      deprecated: true
+  /curation/scholarships/{scholarshipId}:
+    patch:
+      tags: [Curation]
+      summary: Valide, corrige, rejette ou archive une annonce de bourse après vérification de la source 
+        officielle
+      operationId: curateScholarship
+      parameters:
+      - $ref: '#/components/parameters/ScholarshipIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CurateScholarshipRequest'
+      responses:
+        '200':
+          description: Statut de curation et historique de modification mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+
+      x-required-roles:
+      - CURATOR
+      - ADMIN
+    get:
+      tags:
+      - Curation
+      summary: Review full draft and evidence
+      operationId: getCurationScholarship
+      x-required-roles:
+      - CURATOR
+      - ADMIN
+      parameters:
+      - *id001
+      responses:
+        '200':
+          description: Review full draft and evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /curation/sources:
+    get:
+      tags: [Curation]
+      summary: Liste le répertoire des sources officielles surveillées
+      operationId: getOfficialSources
+      responses:
+        '200':
+          description: Liste des sources officielles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OfficialSource'
+
+    post:
+      tags:
+      - Curation
+      summary: Register trusted official scholarship source
+      operationId: createOfficialSource
+      x-required-roles:
+      - CURATOR
+      - ADMIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOfficialSourceRequest'
+      responses:
+        '201':
+          description: Register trusted official scholarship source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialSource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /curation/sources/{sourceId}:
+    patch:
+      tags: [Curation]
+      summary: Met à jour le statut de fiabilité et les notes de vérification d'une source officielle
+      operationId: updateSourceReliability
+      parameters:
+      - name: sourceId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reliabilityStatus]
+              properties:
+                reliabilityStatus:
+                  type: string
+                  enum: [FIABLE, A_SURVEILLER, SUSPECTE]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Source officielle mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialSource'
+
+    get:
+      tags:
+      - Curation
+      summary: Read official source and trust status
+      operationId: getOfficialSourceById
+      x-required-roles:
+      - CURATOR
+      - ADMIN
+      parameters:
+      - name: sourceId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Read official source and trust status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialSource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /curation/duplicates:
+    get:
+      tags: [Curation]
+      summary: Liste les paires d'annonces suspectées de doublon avec leur score de similarité
+      operationId: getDuplicateCandidates
+      responses:
+        '200':
+          description: Liste des doublons potentiels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DuplicateCandidate'
+
+  /curation/duplicates/{duplicateId}/resolve:
+    post:
+      tags: [Curation]
+      summary: Fusionne/archive un doublon confirmé ou écarte le signalement
+      operationId: resolveDuplicateCandidate
+      parameters:
+      - name: duplicateId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [MERGED_ARCHIVED, DISMISSED]
+      responses:
+        '200':
+          description: Signalement de doublon traité
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DuplicateCandidate'
+
+  # ============================================================================
+  # 8. ESPACE ADMINISTRATEUR (/admin)
+  # ============================================================================
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Liste l'ensemble des comptes utilisateurs de la plateforme
+      operationId: listAllUsers
+      responses:
+        '200':
+          description: Liste des comptes utilisateurs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserAccount'
+
+      x-required-roles:
+      - ADMIN
+  /admin/users/{userId}/status:
+    patch:
+      tags: [Admin]
+      summary: Active ou désactive un compte utilisateur
+      operationId: toggleUserActiveStatus
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Statut du compte mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+
+      requestBody:
+        required: false
+        description: Optional idempotent set-to-active value; omitted body supported only for legacy 
+          toggle simulation.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+  /admin/users/{userId}/role:
+    patch:
+      tags: [Admin]
+      summary: Modifie le rôle RBAC d'un compte utilisateur
+      operationId: changeUserRole
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/UserRole'
+      responses:
+        '200':
+          description: Rôle utilisateur mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+
+  /admin/organizations/{organizationId}/verify:
+    patch:
+      tags: [Admin]
+      summary: Accorde, suspend ou rejette l'accréditation d'un compte organisme financeur
+      operationId: verifyOrganizationAccount
+      parameters:
+      - name: organizationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verificationStatus]
+              properties:
+                verificationStatus:
+                  type: string
+                  enum: [VERIFIED, PENDING, SUSPENDED, REJECTED]
+      responses:
+        '200':
+          description: Statut de vérification de l'organisme mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfile'
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Consulte le journal d'audit réglementaire et opérationnel (Loi n° 2024/017, curation, 
+        décisions)
+      operationId: getAuditLogs
+      parameters:
+      - name: actionType
+        in: query
+        schema:
+          type: string
+          enum: [CURATION_DECISION, ORG_VERIFICATION, PRIVACY_CONSENT, CAMPAIGN_PUBLISHED, AWARD_DECISION,
+            ACCOUNT_STATUS]
+      responses:
+        '200':
+          description: Entrées du journal d'audit
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+
+# ==============================================================================
+# COMPOSANTS & SCHÉMAS DE DONNÉES (DTOs)
+# ==============================================================================
+      x-required-roles:
+      - ADMIN
+  /auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: Rotate session using secure HTTP-only refresh cookie
+      operationId: refreshSession
+      security: []
+      responses:
+        '200':
+          description: Rotate session using secure HTTP-only refresh cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/logout:
+    post:
+      tags:
+      - Auth
+      summary: Revoke session/refresh token and clear cookie
+      operationId: logoutUser
+      responses:
+        '204':
+          description: Revoke session/refresh token and clear cookie
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/password/forgot:
+    post:
+      tags:
+      - Auth
+      summary: Request password reset (always generic response)
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202':
+          description: Request password reset (always generic response)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/password/reset:
+    post:
+      tags:
+      - Auth
+      summary: Complete reset with one-time token
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '204':
+          description: Complete reset with one-time token
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /students/me/dashboard:
+    get:
+      tags:
+      - Dashboard
+      summary: 'Student dashboard summary: cards, activities, profile completion'
+      operationId: getMyStudentDashboard
+      x-required-roles:
+      - STUDENT
+      responses:
+        '200':
+          description: 'Student dashboard summary: cards, activities, profile completion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentDashboardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /students/me/profile/completion:
+    get:
+      tags:
+      - Students
+      summary: Get profile completion and missing attributes
+      operationId: getMyProfileCompletion
+      x-required-roles:
+      - STUDENT
+      responses:
+        '200':
+          description: Get profile completion and missing attributes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileCompletion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /students/me/academic-records:
+    get:
+      tags:
+      - AcademicRecords
+      summary: List recorded diplomas and studies
+      operationId: getMyAcademicRecords
+      x-required-roles:
+      - STUDENT
+      responses:
+        '200':
+          description: List recorded diplomas and studies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AcademicRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - AcademicRecords
+      summary: Add an academic record
+      operationId: createMyAcademicRecord
+      x-required-roles:
+      - STUDENT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertAcademicRecordRequest'
+      responses:
+        '201':
+          description: Add an academic record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcademicRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /students/me/academic-records/{recordId}:
+    patch:
+      tags:
+      - AcademicRecords
+      summary: Edit one academic record
+      operationId: updateMyAcademicRecord
+      x-required-roles:
+      - STUDENT
+      parameters:
+      - name: recordId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertAcademicRecordRequest'
+      responses:
+        '200':
+          description: Edit one academic record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcademicRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - AcademicRecords
+      summary: Delete one academic record
+      operationId: removeMyAcademicRecord
+      x-required-roles:
+      - STUDENT
+      parameters:
+      - name: recordId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Delete one academic record
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /students/me/preferences:
+    get:
+      tags:
+      - Students
+      summary: Read scholarship preferences from the existing student profile
+      operationId: getMyStudentPreferences
+      x-required-roles:
+      - STUDENT
+      responses:
+        '200':
+          description: Read scholarship preferences from the existing student profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags:
+      - Students
+      summary: Update existing profile preference fields (same source of truth)
+      operationId: updateMyStudentPreferences
+      x-required-roles:
+      - STUDENT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentPreferencesRequest'
+      responses:
+        '200':
+          description: Update existing profile preference fields (same source of truth)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentPreferences'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /students/me/applications/{applicationId}:
+    get:
+      tags:
+      - Invitations & Applications
+      summary: Get details of own application
+      operationId: getMyApplicationById
+      x-required-roles:
+      - STUDENT
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Get details of own application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /scholarships/search:
+    get:
+      tags:
+      - Scholarships
+      summary: Paged scholarship search without changing legacy /scholarships array
+      operationId: searchScholarshipsPage
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: targetLevel
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/AcademicLevel'
+      - name: requiredDiploma
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/AcademicLevel'
+      - name: domain
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/StudyDomain'
+      - name: hostCountry
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: fundingType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/FundingType'
+      - name: onlyVerified
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: includeExpired
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: sortBy
+        in: query
+        required: false
+        schema:
+          type: string
+          default: DEADLINE_ASC
+      - &id002
+        name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+        description: Page index, zero based
+      - &id003
+        name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+        description: Result limit
+      responses:
+        '200':
+          description: Paged scholarship search without changing legacy /scholarships array
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /public/plans:
+    get:
+      tags:
+      - Plans
+      summary: List organization pricing; essential student features remain free
+      operationId: getPublicOrganizationPlans
+      security: []
+      responses:
+        '200':
+          description: List organization pricing; essential student features remain free
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPlanCatalog'
+  /admin/overview:
+    get:
+      tags:
+      - Dashboard
+      summary: Read admin dashboard KPIs
+      operationId: getAdminOverview
+      x-required-roles:
+      - ADMIN
+      responses:
+        '200':
+          description: Read admin dashboard KPIs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOverviewResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/scholarships:
+    get:
+      tags:
+      - AdminScholarships
+      summary: Page through all scholarship drafts and publication states
+      operationId: listAdminScholarships
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id002
+      - *id003
+      - name: publicationStatus
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/PublicationStatus'
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Page through all scholarship drafts and publication states
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraftPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - AdminScholarships
+      summary: Admin creates an editable manual scholarship draft
+      operationId: createAdminScholarshipDraft
+      x-required-roles:
+      - ADMIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScholarshipDraftRequest'
+      responses:
+        '201':
+          description: Admin creates an editable manual scholarship draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/scholarships/{scholarshipId}:
+    get:
+      tags:
+      - AdminScholarships
+      summary: Read unpublished scholarship draft detail
+      operationId: getAdminScholarshipDraft
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id001
+      responses:
+        '200':
+          description: Read unpublished scholarship draft detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - AdminScholarships
+      summary: Update admin draft (not published directly)
+      operationId: updateAdminScholarshipDraft
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateScholarshipDraftRequest'
+      responses:
+        '200':
+          description: Update admin draft (not published directly)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/scholarships/{scholarshipId}/submit-review:
+    post:
+      tags:
+      - AdminScholarships
+      summary: Submit completed draft for editorial review
+      operationId: submitAdminScholarshipForReview
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id001
+      responses:
+        '200':
+          description: Submit completed draft for editorial review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /admin/scholarships/{scholarshipId}/publish:
+    post:
+      tags:
+      - AdminScholarships
+      summary: Publish after source verification, complete mandatory fields and curator approval
+      operationId: publishAdminScholarship
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id001
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishScholarshipRequest'
+      responses:
+        '200':
+          description: Publish after source verification, complete mandatory fields and curator approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scholarship'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /admin/scholarships/{scholarshipId}/archive:
+    post:
+      tags:
+      - AdminScholarships
+      summary: Archive scholarship and remove it from public listing
+      operationId: archiveAdminScholarship
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id001
+      responses:
+        '200':
+          description: Archive scholarship and remove it from public listing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/ai/scholarships/extract:
+    post:
+      tags:
+      - AI
+      summary: Extract scholarship information and source evidence; never publish automatically
+      operationId: extractScholarshipWithGemini
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiExtractionRequest'
+      responses:
+        '200':
+          description: Extract scholarship information and source evidence; never publish automatically
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiExtractionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /admin/ai/extractions/{extractionId}:
+    get:
+      tags:
+      - AI
+      summary: Get recorded AI extraction result and evidence
+      operationId: getAiExtraction
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      parameters:
+      - name: extractionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Get recorded AI extraction result and evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiExtractionResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/ai/extractions/{extractionId}/create-draft:
+    post:
+      tags:
+      - AI
+      summary: Create manual review draft from AI extraction with explicit user confirmation
+      operationId: createDraftFromAiExtraction
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      parameters:
+      - name: extractionId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScholarshipDraftRequest'
+      responses:
+        '201':
+          description: Create manual review draft from AI extraction with explicit user confirmation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /admin/ingestion/jobs:
+    get:
+      tags:
+      - Ingestion
+      summary: List import job runs
+      operationId: listIngestionJobs
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      parameters:
+      - *id002
+      - *id003
+      responses:
+        '200':
+          description: List import job runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJobPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Ingestion
+      summary: Start asynchronous authorized discovery/import (only creates drafts)
+      operationId: startIngestionJob
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestionJobRequest'
+      responses:
+        '202':
+          description: Start asynchronous authorized discovery/import (only creates drafts)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /admin/ingestion/jobs/{jobId}:
+    get:
+      tags:
+      - Ingestion
+      summary: Track import job progress
+      operationId: getIngestionJob
+      x-required-roles:
+      - ADMIN
+      - CURATOR
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Track import job progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /curation/scholarships:
+    get:
+      tags:
+      - Curation
+      summary: List pending review scholarship drafts
+      operationId: getCurationQueue
+      x-required-roles:
+      - CURATOR
+      - ADMIN
+      parameters:
+      - *id002
+      - *id003
+      - name: publicationStatus
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/PublicationStatus'
+      responses:
+        '200':
+          description: List pending review scholarship drafts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraftPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /organizations/me/scholarships/{scholarshipId}/submit:
+    post:
+      tags:
+      - Organizations
+      summary: Submit organization draft for independent curation (not immediate publication)
+      operationId: submitOrganizationScholarshipForCuration
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - *id001
+      responses:
+        '200':
+          description: Submit organization draft for independent curation (not immediate publication)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScholarshipDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /organizations/me/campaigns:
+    get:
+      tags:
+      - Campaigns
+      summary: List own campaign cycles
+      operationId: getMyOrganizationCampaigns
+      x-required-roles:
+      - ORGANIZATION
+      responses:
+        '200':
+          description: List own campaign cycles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationCampaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Campaigns
+      summary: Create a cycle for an existing organization scholarship
+      operationId: createOrganizationCampaign
+      x-required-roles:
+      - ORGANIZATION
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertOrganizationCampaignRequest'
+      responses:
+        '201':
+          description: Create a cycle for an existing organization scholarship
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationCampaign'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /organizations/me/campaigns/{campaignId}:
+    get:
+      tags:
+      - Campaigns
+      summary: Read own campaign
+      operationId: getOrganizationCampaign
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Read own campaign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationCampaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Campaigns
+      summary: Edit own campaign draft
+      operationId: updateOrganizationCampaign
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertOrganizationCampaignRequest'
+      responses:
+        '200':
+          description: Edit own campaign draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationCampaign'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /organizations/me/campaigns/{campaignId}/activate:
+    post:
+      tags:
+      - Campaigns
+      summary: Activate only when organization verified and scholarship approved
+      operationId: activateOrganizationCampaign
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Activate only when organization verified and scholarship approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationCampaign'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /organizations/me/applications/{applicationId}:
+    get:
+      tags:
+      - Organizations
+      summary: Read own organization application if allowed by student sharing consent
+      operationId: getOrganizationApplicationById
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Read own organization application if allowed by student sharing consent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /organizations/me/talent-pool/{candidatePublicId}:
+    get:
+      tags:
+      - Organizations
+      summary: Get pseudonymized opt-in candidate view by public token (never internal student id)
+      operationId: getPseudonymizedCandidateProfile
+      x-required-roles:
+      - ORGANIZATION
+      parameters:
+      - name: candidatePublicId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Get pseudonymized opt-in candidate view by public token (never internal student 
+            id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnonymizedCandidateProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /organizations/me/subscription/requests:
+    post:
+      tags:
+      - Plans
+      summary: Request plan change; do not activate paid entitlements without verified approval/payment
+      operationId: requestOrganizationPlanChange
+      x-required-roles:
+      - ORGANIZATION
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestSubscriptionChange'
+      responses:
+        '202':
+          description: Request plan change; do not activate paid entitlements without verified 
+            approval/payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags:
+      - Plans
+      summary: List own plan change requests
+      operationId: listOrganizationSubscriptionRequests
+      x-required-roles:
+      - ORGANIZATION
+      responses:
+        '200':
+          description: List own plan change requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/organizations:
+    get:
+      tags:
+      - Admin
+      summary: List organizations and verification statuses
+      operationId: listAdminOrganizations
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - *id002
+      - *id003
+      - name: verificationStatus
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: List organizations and verification statuses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProfilePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/subscription-requests:
+    get:
+      tags:
+      - Plans
+      summary: List pending organization subscription requests
+      operationId: listAdminSubscriptionRequests
+      x-required-roles:
+      - ADMIN
+      responses:
+        '200':
+          description: List pending organization subscription requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/subscription-requests/{requestId}/decide:
+    post:
+      tags:
+      - Plans
+      summary: Admin decision on request; premium activation requires verified payment or explicit 
+        sandbox simulation
+      operationId: decideOrganizationSubscriptionRequest
+      x-required-roles:
+      - ADMIN
+      parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideSubscriptionRequest'
+      responses:
+        '200':
+          description: Admin decision on request; premium activation requires verified payment or 
+            explicit sandbox simulation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ScholarshipIdParam:
+      name: scholarshipId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Requête invalide ou erreur de validation des champs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Jeton d'authentification manquant ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Forbidden:
+      description: Authenticated principal lacks permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: State conflict or confirmed duplicate
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnprocessableEntity:
+      description: Business input inconsistent with validated domain rules
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ServiceUnavailable:
+      description: Temporary external provider or backend failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    UserRole:
+      type: string
+      enum: [STUDENT, ORGANIZATION, CURATOR, ADMIN]
+
+    AcademicLevel:
+      type: string
+      enum:
+      - Baccalauréat
+      - BTS
+      - DUT
+      - HND
+      - Licence
+      - Master
+      - Doctorat
+      - Formation professionnelle
+      - Formation complémentaire
+
+      x-enum-varnames:
+      - BACCALAUREAT
+      - BTS
+      - DUT
+      - HND
+      - LICENCE
+      - MASTER
+      - DOCTORAT
+      - FORMATION_PROFESSIONNELLE
+      - FORMATION_COMPLEMENTAIRE
+    StudyDomain:
+      type: string
+      enum:
+      - Informatique & Systèmes
+      - Génie Civil & Infrastructures
+      - Santé & Sciences Biomédicales
+      - Agronomie & Environnement
+      - Économie, Gestion & Finance
+      - Droit & Sciences Politiques
+      - Énergies Renouvelables & Mines
+      - Sciences de l’Éducation
+      - Tous domaines
+
+      x-enum-varnames:
+      - INFORMATIQUE_SYSTEMES
+      - GENIE_CIVIL_INFRASTRUCTURES
+      - SANTE_SCIENCES_BIOMEDICALES
+      - AGRONOMIE_ENVIRONNEMENT
+      - ECONOMIE_GESTION_FINANCE
+      - DROIT_SCIENCES_POLITIQUES
+      - ENERGIES_RENOUVELABLES_MINES
+      - SCIENCES_EDUCATION
+      - TOUS_DOMAINES
+    FundingType:
+      type: string
+      enum:
+      - Bourse complète (Frais + Vie + Transport)
+      - Exonération des frais de scolarité
+      - Allocation mensuelle de subsistance
+      - Cofinancement / Bourse partielle
+      - Bourse de recherche & mobilité
+
+      x-enum-varnames:
+      - COMPLETE
+      - TUITION_WAIVER
+      - MONTHLY_STIPEND
+      - PARTIAL
+      - RESEARCH_MOBILITY
+    GradingScale:
+      type: string
+      enum: [SUR_20, GPA_4, POURCENTAGE_100]
+
+    LanguageLevel:
+      type: string
+      enum: [A1, A2, B1, B2, C1, C2, Natif]
+
+    CurationStatus:
+      type: string
+      enum: [VERIFIED, PENDING_REVIEW, REJECTED, ARCHIVED]
+
+    ScholarshipStatus:
+      type: string
+      enum: [OPEN, CLOSING_SOON, EXPIRED, DRAFT]
+      description: LEGACY display availability including DRAFT; preserve original values. New 
+        publicationStatus on Scholarship separates editorial lifecycle from deadlines.
+
+    EligibilityGlobalVerdict:
+      type: string
+      enum: [POTENTIALLY_COMPATIBLE, TO_COMPLETE, TO_VERIFY, INCOMPATIBLE]
+
+    CriterionEvaluationStatus:
+      type: string
+      enum: [SATISFIED, NOT_SATISFIED, MISSING_INFO, AMBIGUOUS_TO_VERIFY]
+
+    PlanTierId:
+      type: string
+      enum: [STUDENT_FREE, ORG_DISCOVERY, ORG_PRO, ORG_PREMIUM, ORG_SINGLE_CAMPAIGN]
+      description: Preserve legacy values for existing UI; commercial plans only apply to organizations.
+
+    ApplicationStatus:
+      type: string
+      enum:
+      - Candidature reçue
+      - En cours d’examen
+      - Présélectionnée
+      - Retenue
+      - Non retenue
+
+    UserAccount:
+      type: object
+      required: [id, fullName, email, role, active, createdAt, linkedEntityId]
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date
+        linkedEntityId:
+          type: string
+
+    RegisterStudentRequest:
+      type: object
+      required: [firstName, lastName, email, password, nationality, residenceCountry]
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+
+    RegisterOrganizationRequest:
+      type: object
+      required: [officialName, type, country, contactEmail, contactPersonName, password, 
+          registrationNumber]
+      properties:
+        officialName:
+          type: string
+        type:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        country:
+          type: string
+        website:
+          type: string
+          format: uri
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        registrationNumber:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+        expiresIn:
+          type: integer
+        user:
+          $ref: '#/components/schemas/UserAccount'
+
+    LanguageSkill:
+      type: object
+      required: [language, level]
+      properties:
+        language:
+          type: string
+          enum: [Français, Anglais, Allemand, Espagnol, Mandarin]
+        level:
+          $ref: '#/components/schemas/LanguageLevel'
+        certification:
+          type: string
+          nullable: true
+
+    StudentProfile:
+      type: object
+      required:
+      - id
+      - userId
+      - firstName
+      - lastName
+      - email
+      - isMinor
+      - nationality
+      - residenceCountry
+      - highestDiplomaObtained
+      - currentStudyLevel
+      - targetStudyLevel
+      - studyDomain
+      - gradingScale
+      - languages
+      - preferredDestinationCountries
+      - preferredFundingTypes
+      - institutionalVisibilityEnabled
+      - allowAcademicScoreSharing
+      - savedScholarshipIds
+      - updatedAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        birthYear:
+          type: integer
+        isMinor:
+          type: boolean
+        guardianConsentVerified:
+          type: boolean
+          nullable: true
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        city:
+          type: string
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        highestDiplomaName:
+          type: string
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        currentInstitution:
+          type: string
+        academicYear:
+          type: string
+        averageGrade:
+          type: number
+          format: float
+          nullable: true
+        gradingScale:
+          $ref: '#/components/schemas/GradingScale'
+        normalizedGradeOut20:
+          type: number
+          format: float
+          nullable: true
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+        preferredDestinationCountries:
+          type: array
+          items:
+            type: string
+        preferredFundingTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingType'
+        institutionalVisibilityEnabled:
+          type: boolean
+          default: false
+        visibilityConsentDate:
+          type: string
+          format: date
+          nullable: true
+        allowAcademicScoreSharing:
+          type: boolean
+          default: false
+        savedScholarshipIds:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+          format: date
+
+        academicRecords:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicRecord'
+        profileCompletion:
+          $ref: '#/components/schemas/ProfileCompletion'
+        visibilityConsentAt:
+          type: string
+          format: date-time
+          nullable: true
+        visibilityRevokedAt:
+          type: string
+          format: date-time
+          nullable: true
+      description: Existing v1 profile response; existing required wire fields retained for frontend 
+        compatibility. Onboarding completion is exposed separately via profileCompletion. Confirm 
+        incomplete-profile shape before backend freeze.
+    UpdateStudentProfileRequest:
+      type: object
+      required: [firstName, lastName, nationality, residenceCountry]
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        city:
+          type: string
+        birthYear:
+          type: integer
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        highestDiplomaName:
+          type: string
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        currentInstitution:
+          type: string
+        academicYear:
+          type: string
+        averageGrade:
+          type: number
+          format: float
+          nullable: true
+        gradingScale:
+          $ref: '#/components/schemas/GradingScale'
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+        preferredDestinationCountries:
+          type: array
+          items:
+            type: string
+        preferredFundingTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingType'
+
+    PrivacyConsentUpdateRequest:
+      type: object
+      required: [institutionalVisibilityEnabled]
+      properties:
+        institutionalVisibilityEnabled:
+          type: boolean
+        allowAcademicScoreSharing:
+          type: boolean
+
+    ScholarshipCriteria:
+      type: object
+      required:
+      - eligibleNationalities
+      - requiredResidenceCountries
+      - requiredDiplomaObtained
+      - targetStudyLevels
+      - eligibleDomains
+      - requiresLanguageCertification
+      properties:
+        eligibleNationalities:
+          type: array
+          items:
+            type: string
+        requiredResidenceCountries:
+          type: array
+          items:
+            type: string
+        requiredDiplomaObtained:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        allowedCurrentLevels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcademicLevel'
+        eligibleDomains:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudyDomain'
+        minGradeOut20:
+          type: number
+          format: float
+          nullable: true
+        maxAge:
+          type: integer
+          nullable: true
+        requiredLanguage:
+          type: string
+          enum: [Français, Anglais, Allemand]
+          nullable: true
+        minLanguageLevel:
+          $ref: '#/components/schemas/LanguageLevel'
+        requiresLanguageCertification:
+          type: boolean
+        specificConditions:
+          type: array
+          items:
+            type: string
+        preferentialCriteria:
+          type: array
+          items:
+            type: string
+
+    ModificationRecord:
+      type: object
+      required: [id, date, actorName, actorRole, summary]
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+          format: date
+        actorName:
+          type: string
+        actorRole:
+          $ref: '#/components/schemas/UserRole'
+        summary:
+          type: string
+
+    Scholarship:
+      type: object
+      required:
+      - id
+      - code
+      - title
+      - organizationId
+      - organizationName
+      - organizationType
+      - hostCountry
+      - fundingType
+      - financialSummary
+      - deadline
+      - startDate
+      - durationMonths
+      - description
+      - benefits
+      - requiredDocuments
+      - criteria
+      - sourceName
+      - sourceUrl
+      - retrievedAt
+      - curationStatus
+      - status
+      - modificationHistory
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        title:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        organizationType:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        hostCountry:
+          type: string
+        fundingType:
+          $ref: '#/components/schemas/FundingType'
+        financialSummary:
+          type: string
+        deadline:
+          type: string
+          format: date
+        startDate:
+          type: string
+          format: date
+        durationMonths:
+          type: integer
+        slotsAvailable:
+          type: integer
+          nullable: true
+        description:
+          type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        criteria:
+          $ref: '#/components/schemas/ScholarshipCriteria'
+        isDemoData:
+          type: boolean
+        sourceName:
+          type: string
+        sourceUrl:
+          type: string
+          format: uri
+        retrievedAt:
+          type: string
+          format: date
+        lastVerifiedAt:
+          type: string
+          format: date
+          nullable: true
+        verifiedByCurator:
+          type: string
+          nullable: true
+        curationStatus:
+          $ref: '#/components/schemas/CurationStatus'
+        status:
+          $ref: '#/components/schemas/ScholarshipStatus'
+        modificationHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModificationRecord'
+        duplicateSuspectOfId:
+          type: string
+          nullable: true
+
+        publicationStatus:
+          $ref: '#/components/schemas/PublicationStatus'
+        acquisitionChannel:
+          $ref: '#/components/schemas/ScholarshipAcquisitionChannel'
+        applicationUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    UpsertScholarshipRequest:
+      type: object
+      required:
+      - title
+      - hostCountry
+      - fundingType
+      - financialSummary
+      - deadline
+      - startDate
+      - durationMonths
+      - description
+      - benefits
+      - requiredDocuments
+      - criteria
+      - sourceName
+      - sourceUrl
+      properties:
+        title:
+          type: string
+        hostCountry:
+          type: string
+        fundingType:
+          $ref: '#/components/schemas/FundingType'
+        financialSummary:
+          type: string
+        deadline:
+          type: string
+          format: date
+        startDate:
+          type: string
+          format: date
+        durationMonths:
+          type: integer
+        slotsAvailable:
+          type: integer
+        description:
+          type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        criteria:
+          $ref: '#/components/schemas/ScholarshipCriteria'
+        sourceName:
+          type: string
+        sourceUrl:
+          type: string
+          format: uri
+
+    CriterionEvaluationItem:
+      type: object
+      required: [id, label, isMandatory, expectedValue, studentValue, status, explanation]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        isMandatory:
+          type: boolean
+        expectedValue:
+          type: string
+        studentValue:
+          type: string
+        status:
+          $ref: '#/components/schemas/CriterionEvaluationStatus'
+        explanation:
+          type: string
+        missingFieldKey:
+          type: string
+          nullable: true
+
+    EligibilityReport:
+      type: object
+      required:
+      - scholarshipId
+      - studentId
+      - evaluatedAt
+      - verdict
+      - verdictLabel
+      - summaryExplanation
+      - legalDisclaimer
+      - satisfiedCount
+      - totalMandatoryCount
+      - items
+      - warnings
+      properties:
+        scholarshipId:
+          type: string
+        studentId:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date
+        verdict:
+          $ref: '#/components/schemas/EligibilityGlobalVerdict'
+        verdictLabel:
+          type: string
+          enum: [Potentiellement compatible, À compléter, À vérifier, Incompatible]
+        summaryExplanation:
+          type: string
+        legalDisclaimer:
+          type: string
+        satisfiedCount:
+          type: integer
+        totalMandatoryCount:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionEvaluationItem'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    EvaluatedScholarshipItem:
+      type: object
+      required: [scholarship, report]
+      properties:
+        scholarship:
+          $ref: '#/components/schemas/Scholarship'
+        report:
+          $ref: '#/components/schemas/EligibilityReport'
+
+    RecommendationItem:
+      type: object
+      required: [scholarship, report, reasons, preferenceScore]
+      properties:
+        scholarship:
+          $ref: '#/components/schemas/Scholarship'
+        report:
+          $ref: '#/components/schemas/EligibilityReport'
+        reasons:
+          type: array
+          items:
+            type: string
+        preferenceScore:
+          type: integer
+
+    RecommendationsResponse:
+      type: object
+      required: [appliedCriteriaSummary, strongMatches, toCompleteOrVerify]
+      properties:
+        appliedCriteriaSummary:
+          type: object
+          properties:
+            highestDiplomaObtained:
+              $ref: '#/components/schemas/AcademicLevel'
+            targetStudyLevel:
+              $ref: '#/components/schemas/AcademicLevel'
+            studyDomain:
+              $ref: '#/components/schemas/StudyDomain'
+            preferredDestinationCountries:
+              type: array
+              items:
+                type: string
+        strongMatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendationItem'
+        toCompleteOrVerify:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendationItem'
+
+    AnonymizedCandidateProfile:
+      type: object
+      required:
+      - studentId
+      - anonymizedCode
+      - highestDiplomaObtained
+      - currentStudyLevel
+      - targetStudyLevel
+      - studyDomain
+      - nationality
+      - residenceCountry
+      - languages
+      properties:
+        studentId:
+          type: string
+          description: 'LEGACY property name: value MUST be a public opaque candidate token, not an internal
+            user/student DB id. Use candidatePublicId for new clients; no direct PII/grades unless consent
+            allows it.'
+        anonymizedCode:
+          type: string
+        highestDiplomaObtained:
+          $ref: '#/components/schemas/AcademicLevel'
+        currentStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        targetStudyLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studyDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        nationality:
+          type: string
+        residenceCountry:
+          type: string
+        normalizedGradeOut20:
+          type: number
+          format: float
+          nullable: true
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageSkill'
+
+        candidatePublicId:
+          type: string
+          description: Opaque public pseudonym; never the internal student primary key
+      description: Pseudonymized opt-in candidate teaser for verified organizations only; never fully 
+        anonymous.
+    Invitation:
+      type: object
+      required:
+      - id
+      - organizationId
+      - organizationName
+      - scholarshipId
+      - scholarshipTitle
+      - studentId
+      - studentAnonymizedCode
+      - message
+      - sentAt
+      - status
+      - consentToShareDossier
+      properties:
+        id:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        scholarshipId:
+          type: string
+        scholarshipTitle:
+          type: string
+        studentId:
+          type: string
+        studentAnonymizedCode:
+          type: string
+        studentDisplayName:
+          type: string
+        message:
+          type: string
+        sentAt:
+          type: string
+          format: date
+        respondedAt:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, ACCEPTED, DECLINED]
+        studentResponseNote:
+          type: string
+          nullable: true
+        consentToShareDossier:
+          type: boolean
+
+    SendInvitationRequest:
+      type: object
+      required: [studentId, scholarshipId, message]
+      properties:
+        studentId:
+          type: string
+        scholarshipId:
+          type: string
+        message:
+          type: string
+
+    RespondInvitationRequest:
+      type: object
+      required: [accept]
+      properties:
+        accept:
+          type: boolean
+        note:
+          type: string
+
+    ApplicationRecord:
+      type: object
+      required:
+      - id
+      - referenceCode
+      - scholarshipId
+      - scholarshipTitle
+      - organizationId
+      - organizationName
+      - studentId
+      - studentName
+      - studentHighestDiploma
+      - studentCurrentLevel
+      - studentTargetLevel
+      - studentDomain
+      - studentNationality
+      - submittedAt
+      - updatedAt
+      - status
+      - evaluatorNotes
+      properties:
+        id:
+          type: string
+        referenceCode:
+          type: string
+        scholarshipId:
+          type: string
+        scholarshipTitle:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        studentId:
+          type: string
+        studentName:
+          type: string
+        studentHighestDiploma:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentCurrentLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentTargetLevel:
+          $ref: '#/components/schemas/AcademicLevel'
+        studentDomain:
+          $ref: '#/components/schemas/StudyDomain'
+        studentGradeOut20:
+          type: number
+          format: float
+          nullable: true
+        studentNationality:
+          type: string
+        submittedAt:
+          type: string
+          format: date
+        updatedAt:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/ApplicationStatus'
+        evaluatorNotes:
+          type: string
+        evaluatorScoreOut100:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        decisionRecordedAt:
+          type: string
+          format: date
+          nullable: true
+        decisionJustification:
+          type: string
+          nullable: true
+        originatedFromInvitationId:
+          type: string
+          nullable: true
+
+    SubmitApplicationRequest:
+      type: object
+      required: [scholarshipId]
+      properties:
+        scholarshipId:
+          type: string
+        motivationNote:
+          type: string
+
+    EvaluateApplicationRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ApplicationStatus'
+        evaluatorNotes:
+          type: string
+        evaluatorScoreOut100:
+          type: integer
+          minimum: 0
+          maximum: 100
+        decisionJustification:
+          type: string
+
+    EvaluatorMember:
+      type: object
+      required: [id, name, email, roleTitle, permissionLevel, active]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roleTitle:
+          type: string
+        permissionLevel:
+          type: string
+          enum: [LECTURE_SEULE, EVALUATION_DOSSIERS, DECISION_FINALE]
+        active:
+          type: boolean
+
+    AddEvaluatorRequest:
+      type: object
+      required: [name, email, roleTitle, permissionLevel]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roleTitle:
+          type: string
+        permissionLevel:
+          type: string
+          enum: [LECTURE_SEULE, EVALUATION_DOSSIERS, DECISION_FINALE]
+
+    OrganizationProfile:
+      type: object
+      required:
+      - id
+      - userId
+      - officialName
+      - type
+      - country
+      - contactEmail
+      - contactPersonName
+      - registrationNumber
+      - isVerified
+      - verificationStatus
+      - activePlan
+      - evaluators
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        officialName:
+          type: string
+        type:
+          type: string
+          enum: [Université, Ministère, Fondation, Ambassade, Coopération internationale, Entreprise, ONG]
+        country:
+          type: string
+        address:
+          type: string
+        website:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        description:
+          type: string
+        registrationNumber:
+          type: string
+        isVerified:
+          type: boolean
+        verificationStatus:
+          type: string
+          enum: [VERIFIED, PENDING, SUSPENDED, REJECTED]
+        verifiedAt:
+          type: string
+          format: date
+          nullable: true
+        activePlan:
+          $ref: '#/components/schemas/PlanTierId'
+        evaluators:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluatorMember'
+
+    UpdateOrganizationProfileRequest:
+      type: object
+      properties:
+        officialName:
+          type: string
+        address:
+          type: string
+        website:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPersonName:
+          type: string
+        contactPersonRole:
+          type: string
+        description:
+          type: string
+
+    CommercialSubscription:
+      type: object
+      required:
+      - id
+      - organizationId
+      - organizationName
+      - planId
+      - planName
+      - amountFcfa
+      - billingCycle
+      - status
+      - startedAt
+      properties:
+        id:
+          type: string
+        organizationId:
+          type: string
+        organizationName:
+          type: string
+        planId:
+          $ref: '#/components/schemas/PlanTierId'
+        planName:
+          type: string
+        amountFcfa:
+          type: integer
+        billingCycle:
+          type: string
+          enum: [Mensuel, Campagne ponctuelle, Gratuit]
+        status:
+          type: string
+          enum: [ACTIF_SIMULE, EN_ATTENTE_SIMULE, EXPIRE]
+        startedAt:
+          type: string
+          format: date
+        nextRenewalAt:
+          type: string
+          format: date
+          nullable: true
+
+    CurateScholarshipRequest:
+      type: object
+      required: [curationStatus]
+      properties:
+        curationStatus:
+          $ref: '#/components/schemas/CurationStatus'
+        summaryNote:
+          type: string
+        updatedFields:
+          $ref: '#/components/schemas/UpsertScholarshipRequest'
+
+    OfficialSource:
+      type: object
+      required:
+      - id
+      - name
+      - institutionType
+      - country
+      - officialUrl
+      - reliabilityStatus
+      - lastCheckedAt
+      - activeAnnouncementsCount
+      - notes
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        institutionType:
+          type: string
+        country:
+          type: string
+        officialUrl:
+          type: string
+          format: uri
+        reliabilityStatus:
+          type: string
+          enum: [FIABLE, A_SURVEILLER, SUSPECTE]
+        lastCheckedAt:
+          type: string
+          format: date
+        activeAnnouncementsCount:
+          type: integer
+        notes:
+          type: string
+
+    DuplicateCandidate:
+      type: object
+      required:
+      - id
+      - primaryScholarshipId
+      - duplicateScholarshipId
+      - similarityScore
+      - detectedReasons
+      - status
+      properties:
+        id:
+          type: string
+        primaryScholarshipId:
+          type: string
+        duplicateScholarshipId:
+          type: string
+        similarityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        detectedReasons:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [PENDING, MERGED_ARCHIVED, DISMISSED]
+
+    AppNotification:
+      type: object
+      required: [id, userId, role, category, title, message, createdAt, read, linkTo]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        category:
+          type: string
+          enum: [DEADLINE, INVITATION, NEW_SCHOLARSHIP, CURATION, SYSTEM]
+        title:
+          type: string
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date
+        read:
+          type: boolean
+        linkTo:
+          type: string
+
+    AuditLogEntry:
+      type: object
+      required: [id, timestamp, actorName, actorRole, actionType, targetLabel, details]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+        actorName:
+          type: string
+        actorRole:
+          $ref: '#/components/schemas/UserRole'
+        actionType:
+          type: string
+          enum:
+          - CURATION_DECISION
+          - ORG_VERIFICATION
+          - PRIVACY_CONSENT
+          - CAMPAIGN_PUBLISHED
+          - AWARD_DECISION
+          - ACCOUNT_STATUS
+        targetLabel:
+          type: string
+        details:
+          type: string
+
+    ApiError:
+      type: object
+      required: [timestamp, status, error, message, path]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        code:
+          type: string
+          description: Stable machine readable error code
+        traceId:
+          type: string
+        validationErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldViolation'
+    PublicationStatus:
+      type: string
+      description: Editorial lifecycle, distinct from deadline availability
+      enum: [DRAFT, PENDING_REVIEW, PUBLISHED, ARCHIVED]
+    ScholarshipAcquisitionChannel:
+      type: string
+      enum: [ADMIN_MANUAL, ORGANIZATION_SUBMISSION, AUTOMATED_IMPORT]
+    AcademicRecord:
+      type: object
+      required: [id, diplomaLevel, diplomaName, institutionName, obtained]
+      properties:
+        id: {type: string}
+        diplomaLevel: {$ref: '#/components/schemas/AcademicLevel'}
+        diplomaName: {type: string}
+        institutionName: {type: string}
+        institutionCountry: {type: string}
+        obtained: {type: boolean}
+        completionYear: {type: integer, minimum: 1950, maximum: 2100}
+        gradingScale: {$ref: '#/components/schemas/GradingScale'}
+        grade: {type: number, format: double, nullable: true}
+        normalizedGradeOut20: {type: number, format: double, nullable: true, description: 'Indicative only;
+            never official grade equivalence'}
+        officialEquivalenceVerified: {type: boolean, default: false}
+        notes: {type: string}
+    UpsertAcademicRecordRequest:
+      type: object
+      required: [diplomaLevel, diplomaName, institutionName, obtained]
+      properties:
+        diplomaLevel: {$ref: '#/components/schemas/AcademicLevel'}
+        diplomaName: {type: string, minLength: 1}
+        institutionName: {type: string, minLength: 1}
+        institutionCountry: {type: string}
+        obtained: {type: boolean}
+        completionYear: {type: integer, minimum: 1950, maximum: 2100}
+        gradingScale: {$ref: '#/components/schemas/GradingScale'}
+        grade: {type: number, format: double, nullable: true}
+        notes: {type: string}
+    ProfileCompletion:
+      type: object
+      required: [percentage, missingFields, readyForEligibility]
+      properties:
+        percentage: {type: integer, minimum: 0, maximum: 100}
+        missingFields: {type: array, items: {type: string}}
+        readyForEligibility: {type: boolean}
+        instructions: {type: array, items: {type: string}}
+    StudentPreferences:
+      type: object
+      required: [preferredDestinationCountries, preferredFundingTypes]
+      properties:
+        preferredDestinationCountries: {type: array, items: {type: string}}
+        preferredFundingTypes: {type: array, items: {$ref: '#/components/schemas/FundingType'}}
+        preferredStudyDomains: {type: array, items: {$ref: '#/components/schemas/StudyDomain'}}
+        alertNewScholarships: {type: boolean, default: false}
+        alertDeadlines: {type: boolean, default: false}
+    UpdateStudentPreferencesRequest:
+      type: object
+      properties:
+        preferredDestinationCountries: {type: array, items: {type: string}}
+        preferredFundingTypes: {type: array, items: {$ref: '#/components/schemas/FundingType'}}
+        preferredStudyDomains: {type: array, items: {$ref: '#/components/schemas/StudyDomain'}}
+        alertNewScholarships: {type: boolean}
+        alertDeadlines: {type: boolean}
+    StudentDashboardResponse:
+      type: object
+      required: [displayName, recommendations, favoriteCount, unreadInvitationCount, 
+          unreadNotificationCount, profileCompletion]
+      properties:
+        displayName: {type: string}
+        recommendations: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/RecommendationItem'}}
+        favoriteCount: {type: integer, minimum: 0}
+        unreadInvitationCount: {type: integer, minimum: 0}
+        unreadNotificationCount: {type: integer, minimum: 0}
+        upcomingDeadlines: {type: array, items: {$ref: '#/components/schemas/Scholarship'}}
+        profileCompletion: {$ref: '#/components/schemas/ProfileCompletion'}
+    PageInfo:
+      type: object
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1}
+        totalElements: {type: integer, minimum: 0, format: int64}
+        totalPages: {type: integer, minimum: 0}
+    ScholarshipPage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/Scholarship'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    CreateScholarshipDraftRequest:
+      type: object
+      description: Fields may be missing for a draft; publication requires stronger server validation
+      properties:
+        title: {type: string, minLength: 1}
+        issuerOrganizationId: {type: string, description: 'Issuer reference, even when it has no SCHOLARFIND
+            account'}
+        issuerOrganizationName: {type: string}
+        hostCountry: {type: string}
+        fundingType: {$ref: '#/components/schemas/FundingType'}
+        financialSummary: {type: string}
+        deadline: {type: string, format: date, nullable: true}
+        startDate: {type: string, format: date, nullable: true}
+        durationMonths: {type: integer, minimum: 1, nullable: true}
+        description: {type: string}
+        benefits: {type: array, items: {type: string}}
+        requiredDocuments: {type: array, items: {type: string}}
+        criteria: {$ref: '#/components/schemas/ScholarshipCriteria'}
+        sourceName: {type: string}
+        sourceUrl: {type: string, format: uri}
+        applicationUrl: {type: string, format: uri}
+        internalNotes: {type: string}
+    UpdateScholarshipDraftRequest:
+      allOf:
+      - {$ref: '#/components/schemas/CreateScholarshipDraftRequest'}
+      description: Partial changes are accepted. Client must not send unrelated fields.
+    ScholarshipDraft:
+      type: object
+      required: [id, publicationStatus, acquisitionChannel, createdAt, version]
+      properties:
+        id: {type: string}
+        title: {type: string, nullable: true}
+        publicationStatus: {$ref: '#/components/schemas/PublicationStatus'}
+        acquisitionChannel: {$ref: '#/components/schemas/ScholarshipAcquisitionChannel'}
+        issuerOrganizationId: {type: string, nullable: true}
+        issuerOrganizationName: {type: string, nullable: true}
+        hostCountry: {type: string, nullable: true}
+        fundingType: {$ref: '#/components/schemas/FundingType'}
+        financialSummary: {type: string, nullable: true}
+        deadline: {type: string, format: date, nullable: true}
+        startDate: {type: string, format: date, nullable: true}
+        durationMonths: {type: integer, nullable: true}
+        description: {type: string, nullable: true}
+        benefits: {type: array, items: {type: string}}
+        requiredDocuments: {type: array, items: {type: string}}
+        criteria: {$ref: '#/components/schemas/ScholarshipCriteria'}
+        sourceName: {type: string, nullable: true}
+        sourceUrl: {type: string, format: uri, nullable: true}
+        applicationUrl: {type: string, format: uri, nullable: true}
+        missingPublicationFields: {type: array, items: {type: string}}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        version: {type: integer, format: int64, minimum: 0}
+    ScholarshipDraftPage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/ScholarshipDraft'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PublishScholarshipRequest:
+      type: object
+      properties:
+        expectedVersion: {type: integer, format: int64, minimum: 0}
+        editorialNote: {type: string}
+        acknowledgeSourceVerified: {type: boolean, description: 'Server must still verify source proof'}
+    AiExtractionRequest:
+      type: object
+      description: Provide exactly one of sourceText or sourceUrl; backend validates request and URL 
+        allowlist. Do not send student PII.
+      properties:
+        sourceText: {type: string, minLength: 30, maxLength: 120000}
+        sourceUrl: {type: string, format: uri}
+        sourceName: {type: string}
+        language: {type: string, enum: [fr, en, de, es]}
+        idempotencyKey: {type: string, maxLength: 128}
+    AiExtractionEvidence:
+      type: object
+      required: [field, sourceUrl, excerpt]
+      properties:
+        field: {type: string}
+        sourceUrl: {type: string, format: uri}
+        excerpt: {type: string, maxLength: 1200}
+        confidenceLabel: {type: string, enum: [HIGH, MEDIUM, LOW], description: 'Model estimate, never a substitute
+            for source validation'}
+    AiExtractedScholarshipDraft:
+      type: object
+      properties:
+        title: {type: string, nullable: true}
+        issuerOrganizationName: {type: string, nullable: true}
+        hostCountry: {type: string, nullable: true}
+        targetStudyLevels: {type: array, items: {$ref: '#/components/schemas/AcademicLevel'}}
+        fundingType: {$ref: '#/components/schemas/FundingType'}
+        deadline: {type: string, format: date, nullable: true}
+        criteria: {$ref: '#/components/schemas/ScholarshipCriteria'}
+        financialSummary: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        sourceUrl: {type: string, format: uri, nullable: true}
+    AiExtractionStatus:
+      type: string
+      enum: [PENDING, RUNNING, COMPLETED, FAILED]
+    AiExtractionResult:
+      type: object
+      required: [extractionId, status, createdAt, requiresHumanReview]
+      properties:
+        extractionId: {type: string}
+        status: {$ref: '#/components/schemas/AiExtractionStatus'}
+        draft: {$ref: '#/components/schemas/AiExtractedScholarshipDraft'}
+        evidence: {type: array, items: {$ref: '#/components/schemas/AiExtractionEvidence'}}
+        missingFields: {type: array, items: {type: string}}
+        warnings: {type: array, items: {type: string}}
+        model: {type: string}
+        promptVersion: {type: string}
+        createdAt: {type: string, format: date-time}
+        completedAt: {type: string, format: date-time, nullable: true}
+        requiresHumanReview: {type: boolean, enum: [true]}
+      description: Untrusted AI extraction; a curator/admin must verify source evidence before 
+        publication.
+    IngestionJobRequest:
+      type: object
+      properties:
+        sourceIds: {type: array, maxItems: 30, items: {type: string}}
+        query: {type: string, maxLength: 250}
+        maxAnnouncements: {type: integer, minimum: 1, maximum: 100, default: 20}
+        dryRun: {type: boolean, default: true}
+    IngestionJobStatus:
+      type: string
+      enum: [QUEUED, RUNNING, COMPLETED, PARTIALLY_COMPLETED, FAILED, CANCELLED]
+    IngestionJob:
+      type: object
+      required: [jobId, status, createdAt, importedDraftCount, failedCount]
+      properties:
+        jobId: {type: string}
+        status: {$ref: '#/components/schemas/IngestionJobStatus'}
+        requestedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        completedAt: {type: string, format: date-time, nullable: true}
+        scannedCount: {type: integer, minimum: 0}
+        importedDraftCount: {type: integer, minimum: 0}
+        duplicateCount: {type: integer, minimum: 0}
+        failedCount: {type: integer, minimum: 0}
+        warnings: {type: array, items: {type: string}}
+        dryRun: {type: boolean}
+    IngestionJobPage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/IngestionJob'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    OrganizationPlan:
+      type: object
+      required: [id, displayName, priceFcfa, billingCycle, features, studentFree]
+      properties:
+        id: {$ref: '#/components/schemas/PlanTierId'}
+        displayName: {type: string}
+        priceFcfa: {type: integer, minimum: 0}
+        billingCycle: {type: string, enum: [MONTHLY, SINGLE_CAMPAIGN, FREE]}
+        features: {type: array, items: {type: string}}
+        studentFree: {type: boolean, description: 'Essential student services must remain free'}
+        illustrativePricing: {type: boolean, default: true}
+    OrganizationPlanCatalog:
+      type: object
+      required: [plans, studentEssentialFeaturesAreFree]
+      properties:
+        plans: {type: array, items: {$ref: '#/components/schemas/OrganizationPlan'}}
+        studentEssentialFeaturesAreFree: {type: boolean, enum: [true]}
+        disclaimer: {type: string}
+    SubscriptionRequest:
+      type: object
+      required: [id, organizationId, requestedPlan, status, requestedAt]
+      properties:
+        id: {type: string}
+        organizationId: {type: string}
+        requestedPlan: {$ref: '#/components/schemas/PlanTierId'}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED, CANCELLED]}
+        requestedAt: {type: string, format: date-time}
+        decidedAt: {type: string, format: date-time, nullable: true}
+        activationConfirmed: {type: boolean, description: 'Never grant paid capabilities solely from a client
+            request'}
+    RequestSubscriptionChange:
+      type: object
+      required: [planId]
+      properties:
+        planId: {$ref: '#/components/schemas/PlanTierId'}
+        requestNote: {type: string}
+    DecideSubscriptionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: {type: boolean}
+        reason: {type: string}
+        paymentConfirmed: {type: boolean, default: false}
+    OrganizationCampaignStatus:
+      type: string
+      enum: [DRAFT, PENDING_REVIEW, ACTIVE, CLOSED, ARCHIVED]
+    OrganizationCampaign:
+      type: object
+      required: [id, scholarshipId, organizationId, title, status, createdAt]
+      properties:
+        id: {type: string}
+        scholarshipId: {type: string, description: 'Existing validated scholarship program'}
+        organizationId: {type: string}
+        title: {type: string}
+        status: {$ref: '#/components/schemas/OrganizationCampaignStatus'}
+        applicationDeadline: {type: string, format: date, nullable: true}
+        slotsAvailable: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        notes: {type: string}
+    UpsertOrganizationCampaignRequest:
+      type: object
+      required: [scholarshipId, title]
+      properties:
+        scholarshipId: {type: string}
+        title: {type: string, minLength: 1}
+        applicationDeadline: {type: string, format: date, nullable: true}
+        slotsAvailable: {type: integer, minimum: 0}
+        notes: {type: string}
+    AdminOverviewResponse:
+      type: object
+      required: [totalUsers, totalPublishedScholarships, pendingReviewScholarships, 
+          pendingOrganizationVerifications]
+      properties:
+        totalUsers: {type: integer, minimum: 0}
+        totalPublishedScholarships: {type: integer, minimum: 0}
+        pendingReviewScholarships: {type: integer, minimum: 0}
+        pendingOrganizationVerifications: {type: integer, minimum: 0}
+        activeIngestionJobs: {type: integer, minimum: 0}
+        totalOrganizations: {type: integer, minimum: 0}
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, format: email}
+    PasswordResetConfirmRequest:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token: {type: string}
+        newPassword: {type: string, minLength: 8, format: password}
+    UpdateUserStatusRequest:
+      type: object
+      required: [active]
+      properties:
+        active: {type: boolean}
+    CreateOfficialSourceRequest:
+      type: object
+      required: [name, country, officialUrl]
+      properties:
+        name: {type: string, minLength: 1}
+        country: {type: string}
+        officialUrl: {type: string, format: uri}
+        institutionType: {type: string}
+        notes: {type: string}
+    OrganizationProfilePage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/OrganizationProfile'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    ApplicationRecordPage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/ApplicationRecord'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    CandidateProfilePage:
+      type: object
+      required: [content, page]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/AnonymizedCandidateProfile'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PublicScholarshipFilters:
+      type: object
+      properties:
+        q: {type: string}
+        targetLevel: {$ref: '#/components/schemas/AcademicLevel'}
+        requiredDiploma: {$ref: '#/components/schemas/AcademicLevel'}
+        domain: {$ref: '#/components/schemas/StudyDomain'}
+        hostCountry: {type: string}
+        fundingType: {$ref: '#/components/schemas/FundingType'}
+    FieldViolation:
+      type: object
+      required: [field, reason]
+      properties:
+        field: {type: string}
+        reason: {type: string}
+x-contract-policy:
+  compatibility: 'Additive v1.1 proposal: preserve v1 legacy endpoints, operationIds, schema enums/required
+    fields'
+  frontendModes:
+  - mock
+  - real
+  requireBackendAuthz: true
+  requireHumanReviewForAi: true
+  eligibilityEngine: deterministic Java rules only, four original verdict values unchanged
+  privacy: opt-in discoverability; opaque candidate public tokens; separate dossier consent
+  billing: public professional plans do not create charges or unlock paid features automatically

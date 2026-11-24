@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
+  AcademicLevel,
+  AcademicRecord,
   ApplicationRecord,
   ApplicationStatus,
   AppNotification,
@@ -8,12 +10,17 @@ import {
   CurationStatus,
   DuplicateCandidate,
   EligibilityReport,
+  IngestionJob,
   Invitation,
   OfficialSource,
+  OrganizationCampaign,
   OrganizationProfile,
   PlanTierId,
   Scholarship,
+  ScholarshipDraft,
   StudentProfile,
+  StudyDomain,
+  SubscriptionRequest,
   UserAccount,
   UserRole,
 } from '../types';
@@ -31,8 +38,41 @@ import {
   INITIAL_USER_ACCOUNTS,
 } from '../data/mockData';
 import { evaluateScholarshipEligibility, normalizeGradeTo20 } from '../features/eligibility/eligibilityEngine';
+import {
+  ApiIntegrationMode,
+  ApiRuntimeConfig,
+  getApiRuntimeConfig,
+  resetToMockMode,
+  saveApiRuntimeConfig,
+} from '../api/apiConfig';
+import {
+  buildPseudonymizedCandidateToken,
+  computeMissingPublicationFields,
+  computeStudentProfileCompletion,
+  inferPublicationStatus,
+} from '../api/adapters/openapiAdapters';
 
 const STORAGE_KEY = 'scholarfind_demo_state_v1';
+
+const INITIAL_MOCK_INGESTION_JOBS: IngestionJob[] = [
+  {
+    jobId: 'job-demo-2026-01',
+    status: 'COMPLETED',
+    requestedBy: 'Dr. Hélène Mvondo (Curateur)',
+    createdAt: '2026-11-22T09:15:00Z',
+    startedAt: '2026-11-22T09:15:02Z',
+    completedAt: '2026-11-22T09:16:18Z',
+    scannedCount: 14,
+    importedDraftCount: 2,
+    duplicateCount: 1,
+    failedCount: 0,
+    warnings: [
+      'Les 2 annonces importées ont été placées en statut BROUILLON / EN ATTENTE DE REVUE (aucune publication automatique).',
+    ],
+    dryRun: true,
+    isMockSimulation: true,
+  },
+];
 
 interface PersistedState {
   currentUserId: string;
@@ -48,6 +88,11 @@ interface PersistedState {
   notifications: AppNotification[];
   subscriptions: CommercialSubscription[];
   auditLogs: AuditLogEntry[];
+  // Collections additives OpenAPI 1.1
+  adminDrafts?: ScholarshipDraft[];
+  ingestionJobs?: IngestionJob[];
+  organizationCampaigns?: OrganizationCampaign[];
+  subscriptionRequests?: SubscriptionRequest[];
 }
 
 interface AppContextValue extends PersistedState {
@@ -62,8 +107,28 @@ interface AppContextValue extends PersistedState {
   logoutUser: () => void;
   resetDemoData: () => void;
 
+  // Configuration d'intégration API (OpenAPI 1.1 : 'mock' par défaut vs 'real')
+  apiConfig: ApiRuntimeConfig;
+  setApiMode: (mode: ApiIntegrationMode, baseUrl?: string) => void;
+  fallbackToMockMode: () => void;
+
+  // Inscription conforme OpenAPI 1.1 (profil étudiant autorisé même si parcours académique incomplet)
+  registerStudentAccount: (payload: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    nationality: string;
+    residenceCountry: string;
+    highestDiplomaObtained?: AcademicLevel | '';
+    currentStudyLevel?: AcademicLevel | '';
+    targetStudyLevel?: AcademicLevel | '';
+    studyDomain?: StudyDomain | '';
+  }) => void;
+
   // Services Étudiant
   updateStudentProfile: (studentId: string, patch: Partial<StudentProfile>) => void;
+  addStudentAcademicRecord: (record: Omit<AcademicRecord, 'id' | 'normalizedGradeOut20'>) => void;
+  removeStudentAcademicRecord: (recordId: string) => void;
   toggleSavedScholarship: (scholarshipId: string) => void;
   toggleInstitutionalVisibility: (enabled: boolean, allowScoreSharing?: boolean) => void;
   respondToInvitation: (invitationId: string, accept: boolean, note?: string) => void;
@@ -73,7 +138,8 @@ interface AppContextValue extends PersistedState {
   // Services Organisme
   updateOrganizationProfile: (orgId: string, patch: Partial<OrganizationProfile>) => void;
   createOrUpdateScholarship: (scholarship: Scholarship) => void;
-  sendInvitationToStudent: (studentId: string, scholarshipId: string, message: string) => void;
+  submitOrganizationScholarshipForCuration: (scholarshipId: string) => void;
+  sendInvitationToStudent: (studentOrPublicTokenId: string, scholarshipId: string, message: string) => void;
   updateApplicationStatus: (
     applicationId: string,
     status: ApplicationStatus,
@@ -81,21 +147,86 @@ interface AppContextValue extends PersistedState {
     score?: number,
     decisionJustification?: string
   ) => void;
-  addOrganizationEvaluator: (orgId: string, name: string, email: string, roleTitle: string, permissionLevel: 'LECTURE_SEULE' | 'EVALUATION_DOSSIERS' | 'DECISION_FINALE') => void;
+  addOrganizationEvaluator: (
+    orgId: string,
+    name: string,
+    email: string,
+    roleTitle: string,
+    permissionLevel: 'LECTURE_SEULE' | 'EVALUATION_DOSSIERS' | 'DECISION_FINALE'
+  ) => void;
   changeOrganizationPlan: (orgId: string, planId: PlanTierId) => void;
+  requestOrganizationPlanChange: (orgId: string, planId: PlanTierId, requestNote?: string) => void;
 
   // Services Curateur
-  curateScholarship: (scholarshipId: string, status: CurationStatus, updatedFields?: Partial<Scholarship>, summaryNote?: string) => void;
-  updateSourceReliability: (sourceId: string, status: OfficialSource['reliabilityStatus'], notes?: string) => void;
+  curateScholarship: (
+    scholarshipId: string,
+    status: CurationStatus,
+    updatedFields?: Partial<Scholarship>,
+    summaryNote?: string
+  ) => void;
+  createOfficialSource: (payload: {
+    name: string;
+    institutionType: string;
+    country: string;
+    officialUrl: string;
+    notes?: string;
+  }) => void;
+  updateSourceReliability: (
+    sourceId: string,
+    status: OfficialSource['reliabilityStatus'],
+    notes?: string
+  ) => void;
   resolveDuplicate: (duplicateId: string, action: 'MERGED_ARCHIVED' | 'DISMISSED') => void;
 
-  // Services Administrateur
-  toggleUserActiveStatus: (userId: string) => void;
+  // Services Administrateur (Gouvernance + Brouillons + Demandes d'abonnement)
+  toggleUserActiveStatus: (userId: string, explicitActive?: boolean) => void;
   changeUserRole: (userId: string, newRole: UserRole) => void;
   verifyOrganizationAccount: (orgId: string, status: OrganizationProfile['verificationStatus']) => void;
+  decideSubscriptionRequest: (requestId: string, approve: boolean, reason?: string) => void;
+  createAdminScholarshipDraft: (draftInput: Partial<ScholarshipDraft>) => ScholarshipDraft;
+  updateAdminScholarshipDraft: (draftId: string, patch: Partial<ScholarshipDraft>) => void;
+  submitAdminDraftForReview: (draftId: string) => void;
+  publishAdminScholarshipDraft: (draftId: string, editorialNote?: string) => void;
+  archiveAdminScholarship: (idOrDraftId: string) => void;
   markNotificationRead: (notificationId: string) => void;
   markAllNotificationsRead: () => void;
 }
+
+const enrichStudentsWithCompletion = (students: StudentProfile[]): StudentProfile[] =>
+  students.map((stu) => {
+    const defaultRecords: AcademicRecord[] =
+      stu.academicRecords && stu.academicRecords.length > 0
+        ? stu.academicRecords
+        : stu.highestDiplomaObtained
+        ? [
+            {
+              id: `rec-${stu.id}-1`,
+              diplomaLevel: stu.highestDiplomaObtained,
+              diplomaName: stu.highestDiplomaName || stu.highestDiplomaObtained,
+              institutionName: stu.currentInstitution || 'Établissement déclaré',
+              institutionCountry: stu.residenceCountry,
+              obtained: true,
+              completionYear: 2025,
+              gradingScale: stu.gradingScale,
+              grade: stu.averageGrade,
+              normalizedGradeOut20: stu.normalizedGradeOut20,
+              officialEquivalenceVerified: true,
+            },
+          ]
+        : [];
+    return {
+      ...stu,
+      academicRecords: defaultRecords,
+      profileCompletion: computeStudentProfileCompletion(stu),
+    };
+  });
+
+const enrichScholarshipsWithPublicationStatus = (scholarships: Scholarship[]): Scholarship[] =>
+  scholarships.map((s) => ({
+    ...s,
+    publicationStatus: inferPublicationStatus(s),
+    acquisitionChannel: s.acquisitionChannel || 'ADMIN_MANUAL',
+  }));
 
 const getInitialState = (): PersistedState => {
   try {
@@ -103,21 +234,28 @@ const getInitialState = (): PersistedState => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.users && parsed.scholarships && parsed.students) {
-        const sanitizedScholarships = (parsed.scholarships as Scholarship[]).map((s) =>
-          s.id === 'sch-6'
-            ? {
-                ...s,
-                criteria: {
-                  ...s.criteria,
-                  eligibleDomains: ['Santé & Sciences Biomédicales' as const],
-                },
-              }
-            : s
+        const sanitizedScholarships = enrichScholarshipsWithPublicationStatus(
+          (parsed.scholarships as Scholarship[]).map((s) =>
+            s.id === 'sch-6'
+              ? {
+                  ...s,
+                  criteria: {
+                    ...s.criteria,
+                    eligibleDomains: ['Santé & Sciences Biomédicales' as const],
+                  },
+                }
+              : s
+          )
         );
         return {
           ...parsed,
+          students: enrichStudentsWithCompletion(parsed.students as StudentProfile[]),
           scholarships: sanitizedScholarships,
           isAuthenticated: parsed.isAuthenticated !== undefined ? parsed.isAuthenticated : true,
+          adminDrafts: parsed.adminDrafts || [],
+          ingestionJobs: parsed.ingestionJobs || INITIAL_MOCK_INGESTION_JOBS,
+          organizationCampaigns: parsed.organizationCampaigns || [],
+          subscriptionRequests: parsed.subscriptionRequests || [],
         };
       }
     }
@@ -128,9 +266,9 @@ const getInitialState = (): PersistedState => {
     currentUserId: 'usr-stu-1',
     isAuthenticated: true,
     users: INITIAL_USER_ACCOUNTS,
-    students: INITIAL_STUDENT_PROFILES,
+    students: enrichStudentsWithCompletion(INITIAL_STUDENT_PROFILES),
     organizations: INITIAL_ORGANIZATIONS,
-    scholarships: INITIAL_SCHOLARSHIPS,
+    scholarships: enrichScholarshipsWithPublicationStatus(INITIAL_SCHOLARSHIPS),
     invitations: INITIAL_INVITATIONS,
     applications: INITIAL_APPLICATIONS,
     sources: INITIAL_OFFICIAL_SOURCES,
@@ -138,6 +276,10 @@ const getInitialState = (): PersistedState => {
     notifications: INITIAL_NOTIFICATIONS,
     subscriptions: INITIAL_SUBSCRIPTIONS,
     auditLogs: INITIAL_AUDIT_LOGS,
+    adminDrafts: [],
+    ingestionJobs: INITIAL_MOCK_INGESTION_JOBS,
+    organizationCampaigns: [],
+    subscriptionRequests: [],
   };
 };
 
@@ -146,6 +288,7 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<PersistedState>(getInitialState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [apiConfig, setApiConfigState] = useState<ApiRuntimeConfig>(getApiRuntimeConfig);
 
   useEffect(() => {
     try {
@@ -160,6 +303,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTimeout(() => {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 4200);
+  };
+
+  const setApiMode = (mode: ApiIntegrationMode, baseUrl?: string) => {
+    const updated = saveApiRuntimeConfig({
+      mode,
+      baseUrl: baseUrl ?? apiConfig.baseUrl,
+    });
+    setApiConfigState(updated);
+    showToast(
+      mode === 'mock'
+        ? 'Mode Démonstration (Mock) actif : données locales utilisées.'
+        : `Mode API Réel activé (${updated.baseUrl}). Attention : le serveur Spring Boot doit être démarré.`
+    );
+  };
+
+  const fallbackToMockMode = () => {
+    const updated = resetToMockMode();
+    setApiConfigState(updated);
+    showToast('Retour au mode Démonstration (Mock) effectué.');
   };
 
   const currentUser = useMemo(
@@ -221,13 +383,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const resetDemoData = () => {
     localStorage.removeItem(STORAGE_KEY);
+    const updatedCfg = resetToMockMode();
+    setApiConfigState(updatedCfg);
     setState({
       currentUserId: 'usr-stu-1',
       isAuthenticated: true,
       users: INITIAL_USER_ACCOUNTS,
-      students: INITIAL_STUDENT_PROFILES,
+      students: enrichStudentsWithCompletion(INITIAL_STUDENT_PROFILES),
       organizations: INITIAL_ORGANIZATIONS,
-      scholarships: INITIAL_SCHOLARSHIPS,
+      scholarships: enrichScholarshipsWithPublicationStatus(INITIAL_SCHOLARSHIPS),
       invitations: INITIAL_INVITATIONS,
       applications: INITIAL_APPLICATIONS,
       sources: INITIAL_OFFICIAL_SOURCES,
@@ -235,21 +399,156 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifications: INITIAL_NOTIFICATIONS,
       subscriptions: INITIAL_SUBSCRIPTIONS,
       auditLogs: INITIAL_AUDIT_LOGS,
+      adminDrafts: [],
+      ingestionJobs: INITIAL_MOCK_INGESTION_JOBS,
+      organizationCampaigns: [],
+      subscriptionRequests: [],
     });
     showToast('Données de démonstration réinitialisées à leur état initial.');
+  };
+
+  /**
+   * Inscription d'un étudiant conforme à RegisterStudentRequest (OpenAPI 1.1) :
+   * Les champs académiques sont optionnels à l'inscription ; s'ils ne sont pas fournis,
+   * ils restent vides ('') sans jamais être remplacés par de fausses valeurs.
+   */
+  const registerStudentAccount: AppContextValue['registerStudentAccount'] = (payload) => {
+    const newStuId = `stu-${Date.now()}`;
+    const newUserId = `usr-stu-${Date.now()}`;
+    const newStudent: StudentProfile = {
+      id: newStuId,
+      userId: newUserId,
+      firstName: payload.firstName.trim(),
+      lastName: payload.lastName.trim(),
+      email: payload.email.trim(),
+      isMinor: false,
+      nationality: payload.nationality.trim() || 'Cameroun',
+      residenceCountry: payload.residenceCountry.trim() || 'Cameroun',
+      city: '',
+      highestDiplomaObtained: payload.highestDiplomaObtained || '',
+      highestDiplomaName: payload.highestDiplomaObtained || '',
+      currentStudyLevel: payload.currentStudyLevel || '',
+      targetStudyLevel: payload.targetStudyLevel || '',
+      studyDomain: payload.studyDomain || '',
+      currentInstitution: '',
+      academicYear: '2026-2027',
+      averageGrade: null,
+      gradingScale: 'SUR_20',
+      normalizedGradeOut20: null,
+      languages: [{ language: 'Français', level: 'C1' }],
+      preferredDestinationCountries: [],
+      preferredFundingTypes: [],
+      institutionalVisibilityEnabled: false,
+      allowAcademicScoreSharing: false,
+      savedScholarshipIds: [],
+      updatedAt: '2026-11-24',
+      academicRecords: payload.highestDiplomaObtained
+        ? [
+            {
+              id: `rec-${newStuId}-1`,
+              diplomaLevel: payload.highestDiplomaObtained,
+              diplomaName: payload.highestDiplomaObtained,
+              institutionName: 'Établissement à compléter',
+              institutionCountry: payload.residenceCountry.trim() || 'Cameroun',
+              obtained: true,
+              completionYear: 2026,
+              gradingScale: 'SUR_20',
+              grade: null,
+              normalizedGradeOut20: null,
+              officialEquivalenceVerified: false,
+            },
+          ]
+        : [],
+    };
+    newStudent.profileCompletion = computeStudentProfileCompletion(newStudent);
+
+    const newUser: UserAccount = {
+      id: newUserId,
+      email: payload.email.trim(),
+      fullName: `${payload.firstName.trim()} ${payload.lastName.trim()}`,
+      role: 'STUDENT',
+      active: true,
+      createdAt: '2026-11-24',
+      lastLoginAt: '2026-11-24',
+      linkedEntityId: newStuId,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      currentUserId: newUserId,
+      isAuthenticated: true,
+      users: [newUser, ...prev.users],
+      students: [newStudent, ...prev.students],
+    }));
+
+    showToast(
+      newStudent.profileCompletion.readyForEligibility
+        ? `Compte créé pour ${newUser.fullName} (Simulation).`
+        : `Compte créé pour ${newUser.fullName}. Complète ton profil académique quand tu le souhaites.`
+    );
   };
 
   const updateStudentProfile = (studentId: string, patch: Partial<StudentProfile>) => {
     setState((prev) => {
       const students = prev.students.map((stu) => {
         if (stu.id !== studentId) return stu;
-        const merged = { ...stu, ...patch, updatedAt: '2026-11-23' };
+        const merged: StudentProfile = { ...stu, ...patch, updatedAt: '2026-11-23' };
         merged.normalizedGradeOut20 = normalizeGradeTo20(merged.averageGrade, merged.gradingScale);
+        merged.profileCompletion = computeStudentProfileCompletion(merged);
         return merged;
       });
       return { ...prev, students };
     });
     showToast('Profil académique mis à jour et sauvegardé localement.');
+  };
+
+  const addStudentAcademicRecord: AppContextValue['addStudentAcademicRecord'] = (record) => {
+    setState((prev) => {
+      const stuId = currentStudent.id;
+      const students = prev.students.map((stu) => {
+        if (stu.id !== stuId) return stu;
+        const scale = record.gradingScale || 'SUR_20';
+        const grade = record.grade ?? null;
+        const newRec: AcademicRecord = {
+          ...record,
+          id: `rec-${Date.now()}`,
+          gradingScale: scale,
+          grade,
+          normalizedGradeOut20: normalizeGradeTo20(grade, scale),
+        };
+        const updatedRecords = [newRec, ...(stu.academicRecords || [])];
+        const updatedStu: StudentProfile = {
+          ...stu,
+          academicRecords: updatedRecords,
+          // Si aucun diplôme principal n'était renseigné et que celui-ci est obtenu, on synchronise sans écraser un diplôme existant
+          highestDiplomaObtained:
+            stu.highestDiplomaObtained || (newRec.obtained ? newRec.diplomaLevel : ''),
+          highestDiplomaName:
+            stu.highestDiplomaName || (newRec.obtained ? newRec.diplomaName : ''),
+          updatedAt: '2026-11-24',
+        };
+        updatedStu.profileCompletion = computeStudentProfileCompletion(updatedStu);
+        return updatedStu;
+      });
+      return { ...prev, students };
+    });
+    showToast('Diplôme / parcours ajouté à ton historique académique.');
+  };
+
+  const removeStudentAcademicRecord = (recordId: string) => {
+    setState((prev) => {
+      const stuId = currentStudent.id;
+      const students = prev.students.map((stu) => {
+        if (stu.id !== stuId) return stu;
+        return {
+          ...stu,
+          academicRecords: (stu.academicRecords || []).filter((r) => r.id !== recordId),
+          updatedAt: '2026-11-24',
+        };
+      });
+      return { ...prev, students };
+    });
+    showToast('Entrée retirée de ton historique académique.');
   };
 
   const toggleSavedScholarship = (scholarshipId: string) => {
@@ -275,12 +574,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleInstitutionalVisibility = (enabled: boolean, allowScoreSharing?: boolean) => {
     setState((prev) => {
       const stuId = currentStudent.id;
+      const nowIso = '2026-11-24T08:00:00Z';
       const students = prev.students.map((stu) => {
         if (stu.id !== stuId) return stu;
         return {
           ...stu,
           institutionalVisibilityEnabled: enabled,
-          visibilityConsentDate: enabled ? '2026-11-23' : undefined,
+          visibilityConsentDate: enabled ? '2026-11-24' : undefined,
+          visibilityConsentAt: enabled ? nowIso : stu.visibilityConsentAt,
+          visibilityRevokedAt: !enabled ? nowIso : undefined,
           allowAcademicScoreSharing:
             allowScoreSharing !== undefined ? allowScoreSharing : stu.allowAcademicScoreSharing,
         };
@@ -297,7 +599,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     showToast(
       enabled
-        ? 'Visibilité institutionnelle activée : seuls les organismes vérifiés peuvent voir votre profil anonymisé.'
+        ? 'Visibilité institutionnelle activée : seuls les organismes vérifiés peuvent voir votre profil pseudonymisé.'
         : 'Votre profil est désormais strictement privé.'
     );
   };
@@ -313,7 +615,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...inv,
               status: accept ? ('ACCEPTED' as const) : ('DECLINED' as const),
               respondedAt: '2026-11-23',
-              studentResponseNote: note || (accept ? 'Invitation acceptée avec consentement de partage.' : 'Invitation déclinée.'),
+              studentResponseNote:
+                note ||
+                (accept
+                  ? 'Invitation acceptée avec consentement de partage.'
+                  : 'Invitation déclinée.'),
               consentToShareDossier: accept,
             }
           : inv
@@ -344,7 +650,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             submittedAt: '2026-11-23',
             updatedAt: '2026-11-23',
             status: 'Candidature reçue',
-            evaluatorNotes: 'Dossier transmis suite à l’acceptation d’une invitation institutionnelle.',
+            evaluatorNotes:
+              'Dossier transmis suite à l’acceptation d’une invitation institutionnelle.',
             originatedFromInvitationId: invitationId,
           };
           applications = [newApp, ...prev.applications];
@@ -428,23 +735,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const createOrUpdateScholarship = (scholarship: Scholarship) => {
     setState((prev) => {
       const exists = prev.scholarships.some((s) => s.id === scholarship.id);
+      const enriched: Scholarship = {
+        ...scholarship,
+        publicationStatus: inferPublicationStatus(scholarship),
+        acquisitionChannel: scholarship.acquisitionChannel || 'ORGANIZATION_SUBMISSION',
+      };
       const scholarships = exists
-        ? prev.scholarships.map((s) => (s.id === scholarship.id ? scholarship : s))
-        : [scholarship, ...prev.scholarships];
+        ? prev.scholarships.map((s) => (s.id === scholarship.id ? enriched : s))
+        : [enriched, ...prev.scholarships];
 
       const auditLogs = appendAuditLog(
         prev,
         'CAMPAIGN_PUBLISHED',
         scholarship.title,
-        exists ? 'Mise à jour des paramètres et critères de la campagne.' : 'Création d’un nouveau programme de bourse de démonstration.'
+        exists
+          ? 'Mise à jour des paramètres et critères de la campagne.'
+          : `Soumission d’un programme de bourse (${enriched.publicationStatus} / ${enriched.curationStatus}).`
       );
       return { ...prev, scholarships, auditLogs };
     });
-    showToast('Programme de bourse enregistré avec succès.');
+    showToast(
+      scholarship.curationStatus === 'PENDING_REVIEW'
+        ? 'Programme enregistré et soumis à la curation avant publication publique.'
+        : 'Programme de bourse enregistré avec succès.'
+    );
   };
 
-  const sendInvitationToStudent = (studentId: string, scholarshipId: string, message: string) => {
-    const student = state.students.find((s) => s.id === studentId);
+  const submitOrganizationScholarshipForCuration = (scholarshipId: string) => {
+    setState((prev) => ({
+      ...prev,
+      scholarships: prev.scholarships.map((s) =>
+        s.id === scholarshipId
+          ? {
+              ...s,
+              curationStatus: 'PENDING_REVIEW',
+              publicationStatus: 'PENDING_REVIEW',
+            }
+          : s
+      ),
+    }));
+    showToast('Offre soumise à la revue documentaire du curateur.');
+  };
+
+  /**
+   * Envoi d'invitation supportant à la fois le jeton public opaque `candidatePublicId`
+   * (conforme OpenAPI 1.1) et l'identifiant interne en fallback de démonstration.
+   */
+  const sendInvitationToStudent = (
+    studentOrPublicTokenId: string,
+    scholarshipId: string,
+    message: string
+  ) => {
+    const student = state.students.find(
+      (s) =>
+        s.id === studentOrPublicTokenId ||
+        buildPseudonymizedCandidateToken(s.id) === studentOrPublicTokenId
+    );
     const scholarship = state.scholarships.find((s) => s.id === scholarshipId);
     if (!student || !scholarship) return;
 
@@ -488,7 +834,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     });
 
-    showToast('Invitation simulée transmise au candidat volontaire.');
+    showToast('Invitation simulée transmise au candidat volontaire pseudonymisé.');
   };
 
   const updateApplicationStatus = (
@@ -561,15 +907,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Collaborateur évaluateur « ${name} » ajouté à l'équipe.`);
   };
 
-  const changeOrganizationPlan = (orgId: string, planId: PlanTierId) => {
-    const planDetails: Record<PlanTierId, { name: string; amount: number; cycle: CommercialSubscription['billingCycle'] }> = {
-      STUDENT_FREE: { name: 'Étudiant Gratuit', amount: 0, cycle: 'Gratuit' },
-      ORG_DISCOVERY: { name: 'Organisme Découverte', amount: 0, cycle: 'Gratuit' },
-      ORG_PRO: { name: 'Organisme Pro', amount: 50000, cycle: 'Mensuel' },
-      ORG_PREMIUM: { name: 'Organisme Premium', amount: 150000, cycle: 'Mensuel' },
-      ORG_SINGLE_CAMPAIGN: { name: 'Campagne ponctuelle', amount: 75000, cycle: 'Campagne ponctuelle' },
-    };
+  const planDetails: Record<
+    PlanTierId,
+    { name: string; amount: number; cycle: CommercialSubscription['billingCycle'] }
+  > = {
+    STUDENT_FREE: { name: 'Étudiant Gratuit', amount: 0, cycle: 'Gratuit' },
+    ORG_DISCOVERY: { name: 'Organisme Découverte', amount: 0, cycle: 'Gratuit' },
+    ORG_PRO: { name: 'Organisme Pro', amount: 50000, cycle: 'Mensuel' },
+    ORG_PREMIUM: { name: 'Organisme Premium', amount: 150000, cycle: 'Mensuel' },
+    ORG_SINGLE_CAMPAIGN: {
+      name: 'Campagne ponctuelle',
+      amount: 75000,
+      cycle: 'Campagne ponctuelle',
+    },
+  };
 
+  const changeOrganizationPlan = (orgId: string, planId: PlanTierId) => {
     setState((prev) => {
       const organizations = prev.organizations.map((o) =>
         o.id === orgId ? { ...o, activePlan: planId } : o
@@ -594,7 +947,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ];
       return { ...prev, organizations, subscriptions };
     });
-    showToast(`Formule simulée mise à jour : ${planDetails[planId].name} (aucun paiement réel effectué).`);
+    showToast(
+      `Formule simulée en mode Sandbox : ${planDetails[planId].name} (aucun paiement réel effectué).`
+    );
+  };
+
+  /**
+   * Nouveau flux OpenAPI 1.1 : POST /organizations/me/subscription/requests
+   * Crée une demande de changement de plan soumise à validation administrative
+   * sans débloquer automatiquement de droits payants sur simple requête client.
+   */
+  const requestOrganizationPlanChange = (
+    orgId: string,
+    planId: PlanTierId,
+    requestNote?: string
+  ) => {
+    setState((prev) => {
+      const org = prev.organizations.find((o) => o.id === orgId);
+      const newReq: SubscriptionRequest = {
+        id: `subreq-${Date.now()}`,
+        organizationId: orgId,
+        organizationName: org?.officialName || 'Organisme',
+        requestedPlan: planId,
+        status: 'PENDING',
+        requestedAt: '2026-11-24T08:00:00Z',
+        activationConfirmed: false,
+        requestNote:
+          requestNote ||
+          `Demande de souscription à la formule ${planDetails[planId].name}.`,
+      };
+      return {
+        ...prev,
+        subscriptionRequests: [newReq, ...(prev.subscriptionRequests || [])],
+      };
+    });
+    showToast(
+      `Demande de passage à « ${planDetails[planId].name} » enregistrée (en attente de validation administrative).`
+    );
+  };
+
+  const decideSubscriptionRequest = (
+    requestId: string,
+    approve: boolean,
+    reason?: string
+  ) => {
+    setState((prev) => {
+      const target = (prev.subscriptionRequests || []).find((r) => r.id === requestId);
+      if (!target) return prev;
+
+      const subscriptionRequests = (prev.subscriptionRequests || []).map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: approve ? ('APPROVED' as const) : ('REJECTED' as const),
+              decidedAt: '2026-11-24T08:30:00Z',
+              activationConfirmed: approve,
+              decisionReason:
+                reason ||
+                (approve
+                  ? 'Demande approuvée par l’administrateur (simulation sandbox).'
+                  : 'Demande refusée.'),
+            }
+          : r
+      );
+
+      if (!approve) {
+        return { ...prev, subscriptionRequests };
+      }
+
+      const info = planDetails[target.requestedPlan];
+      const organizations = prev.organizations.map((o) =>
+        o.id === target.organizationId
+          ? { ...o, activePlan: target.requestedPlan }
+          : o
+      );
+      const newSub: CommercialSubscription = {
+        id: `sub-${Date.now()}`,
+        organizationId: target.organizationId,
+        organizationName: target.organizationName || 'Organisme',
+        planId: target.requestedPlan,
+        planName: info.name,
+        amountFcfa: info.amount,
+        billingCycle: info.cycle,
+        status: 'ACTIF_SIMULE',
+        startedAt: '2026-11-24',
+        nextRenewalAt: info.cycle === 'Mensuel' ? '2026-12-24' : undefined,
+      };
+      const subscriptions = [
+        newSub,
+        ...prev.subscriptions.filter((s) => s.organizationId !== target.organizationId),
+      ];
+
+      return { ...prev, subscriptionRequests, organizations, subscriptions };
+    });
+    showToast(
+      approve
+        ? 'Demande d’abonnement approuvée et activée en mode simulation.'
+        : 'Demande d’abonnement rejetée.'
+    );
   };
 
   const curateScholarship = (
@@ -615,12 +1065,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             summaryNote ||
             `Décision de curation : passage au statut ${curationStatus}.`,
         };
+        const nextPubStatus =
+          curationStatus === 'VERIFIED'
+            ? ('PUBLISHED' as const)
+            : curationStatus === 'ARCHIVED' || curationStatus === 'REJECTED'
+            ? ('ARCHIVED' as const)
+            : ('PENDING_REVIEW' as const);
+
         return {
           ...sch,
           ...updatedFields,
           curationStatus,
+          publicationStatus: nextPubStatus,
           lastVerifiedAt: curationStatus === 'VERIFIED' ? '2026-11-23' : sch.lastVerifiedAt,
-          verifiedByCurator: curationStatus === 'VERIFIED' ? currentUser.fullName : sch.verifiedByCurator,
+          verifiedByCurator:
+            curationStatus === 'VERIFIED' ? currentUser.fullName : sch.verifiedByCurator,
           status: curationStatus === 'ARCHIVED' ? ('EXPIRED' as const) : sch.status,
           modificationHistory: [newMod, ...sch.modificationHistory],
         };
@@ -636,6 +1095,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ...prev, scholarships, auditLogs };
     });
     showToast(`Annonce mise à jour avec le statut de curation : ${curationStatus}.`);
+  };
+
+  const createOfficialSource: AppContextValue['createOfficialSource'] = (payload) => {
+    setState((prev) => {
+      const newSrc: OfficialSource = {
+        id: `src-${Date.now()}`,
+        name: payload.name.trim(),
+        institutionType: payload.institutionType.trim() || 'Institution officielle',
+        country: payload.country.trim() || 'Cameroun',
+        officialUrl: payload.officialUrl.trim(),
+        reliabilityStatus: 'A_CONTROLER',
+        lastCheckedAt: '2026-11-24',
+        activeAnnouncementsCount: 0,
+        notes:
+          payload.notes?.trim() ||
+          'Nouvelle source enregistrée dans le répertoire officiel.',
+      };
+      return {
+        ...prev,
+        sources: [newSrc, ...prev.sources],
+      };
+    });
+    showToast(`Source officielle « ${payload.name} » ajoutée au répertoire.`);
   };
 
   const updateSourceReliability = (
@@ -659,7 +1141,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Statut de fiabilité de la source mis à jour.');
   };
 
-  const resolveDuplicate = (duplicateId: string, action: 'MERGED_ARCHIVED' | 'DISMISSED') => {
+  const resolveDuplicate = (
+    duplicateId: string,
+    action: 'MERGED_ARCHIVED' | 'DISMISSED'
+  ) => {
     setState((prev) => {
       const dup = prev.duplicates.find((d) => d.id === duplicateId);
       const duplicates = prev.duplicates.map((d) =>
@@ -668,7 +1153,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let scholarships = prev.scholarships;
       if (action === 'MERGED_ARCHIVED' && dup) {
         scholarships = prev.scholarships.map((s) =>
-          s.id === dup.duplicateScholarshipId ? { ...s, curationStatus: 'ARCHIVED' as const } : s
+          s.id === dup.duplicateScholarshipId
+            ? {
+                ...s,
+                curationStatus: 'ARCHIVED' as const,
+                publicationStatus: 'ARCHIVED' as const,
+              }
+            : s
         );
       }
       return { ...prev, duplicates, scholarships };
@@ -680,15 +1171,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const toggleUserActiveStatus = (userId: string) => {
+  const toggleUserActiveStatus = (userId: string, explicitActive?: boolean) => {
     setState((prev) => {
       const target = prev.users.find((u) => u.id === userId);
-      const users = prev.users.map((u) => (u.id === userId ? { ...u, active: !u.active } : u));
+      const nextActive = explicitActive !== undefined ? explicitActive : !target?.active;
+      const users = prev.users.map((u) =>
+        u.id === userId ? { ...u, active: nextActive } : u
+      );
       const auditLogs = appendAuditLog(
         prev,
         'ACCOUNT_STATUS',
         `Compte ${target?.fullName || userId}`,
-        target?.active ? 'Désactivation administrative du compte.' : 'Réactivation administrative du compte.'
+        nextActive
+          ? 'Réactivation administrative du compte.'
+          : 'Désactivation administrative du compte.'
       );
       return { ...prev, users, auditLogs };
     });
@@ -731,6 +1227,213 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Statut de l'organisme mis à jour : ${verificationStatus}.`);
   };
 
+  /**
+   * Cycle éditorial des bourses côté Administrateur (OpenAPI 1.1 : /admin/scholarships)
+   * RÈGLE ABSOLUE : La création d'une bourse ne déclenche JAMAIS sa publication immédiate.
+   * Elle commence en statut `DRAFT` (non visible dans le catalogue public).
+   */
+  const createAdminScholarshipDraft: AppContextValue['createAdminScholarshipDraft'] = (
+    draftInput
+  ) => {
+    const newDraft: ScholarshipDraft = {
+      id: `draft-${Date.now()}`,
+      title: draftInput.title?.trim() || 'Nouveau brouillon de bourse',
+      publicationStatus: 'DRAFT',
+      acquisitionChannel: draftInput.acquisitionChannel || 'ADMIN_MANUAL',
+      issuerOrganizationId: draftInput.issuerOrganizationId,
+      issuerOrganizationName: draftInput.issuerOrganizationName?.trim() || '',
+      hostCountry: draftInput.hostCountry?.trim() || 'France',
+      fundingType:
+        draftInput.fundingType || 'Bourse complète (Frais + Vie + Transport)',
+      financialSummary: draftInput.financialSummary?.trim() || '',
+      deadline: draftInput.deadline || '2027-06-30',
+      startDate: draftInput.startDate || '2027-09-15',
+      durationMonths: draftInput.durationMonths || 12,
+      description: draftInput.description?.trim() || '',
+      benefits: draftInput.benefits || [
+        'Prise en charge académique selon les conditions officielles',
+      ],
+      requiredDocuments: draftInput.requiredDocuments || [
+        'Diplôme certifié conforme',
+        'Relevés de notes',
+        'Lettre de motivation',
+      ],
+      criteria: draftInput.criteria || {
+        eligibleNationalities: ['Cameroun', 'Toutes'],
+        requiredResidenceCountries: ['Tous'],
+        requiredDiplomaObtained: ['Licence'],
+        targetStudyLevels: ['Master'],
+        eligibleDomains: ['Informatique & Systèmes'],
+        minGradeOut20: 14,
+        maxAge: 28,
+        requiredLanguage: 'Français',
+        minLanguageLevel: 'B2',
+        requiresLanguageCertification: false,
+        specificConditions: [],
+        preferentialCriteria: [],
+      },
+      sourceName: draftInput.sourceName?.trim() || '',
+      sourceUrl: draftInput.sourceUrl?.trim() || '',
+      applicationUrl: draftInput.applicationUrl?.trim() || undefined,
+      internalNotes: draftInput.internalNotes?.trim() || '',
+      missingPublicationFields: [],
+      createdBy: currentUser.fullName,
+      createdAt: '2026-11-24T08:00:00Z',
+      updatedAt: '2026-11-24T08:00:00Z',
+      version: 1,
+    };
+    newDraft.missingPublicationFields = computeMissingPublicationFields(newDraft);
+
+    setState((prev) => ({
+      ...prev,
+      adminDrafts: [newDraft, ...(prev.adminDrafts || [])],
+    }));
+
+    showToast(
+      'Brouillon enregistré (statut DRAFT). Il n’est pas encore publié dans le catalogue étudiant.'
+    );
+    return newDraft;
+  };
+
+  const updateAdminScholarshipDraft = (
+    draftId: string,
+    patch: Partial<ScholarshipDraft>
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      adminDrafts: (prev.adminDrafts || []).map((d) => {
+        if (d.id !== draftId) return d;
+        const merged: ScholarshipDraft = {
+          ...d,
+          ...patch,
+          updatedAt: '2026-11-24T08:15:00Z',
+          version: d.version + 1,
+        };
+        merged.missingPublicationFields = computeMissingPublicationFields(merged);
+        return merged;
+      }),
+    }));
+    showToast('Modifications du brouillon enregistrées.');
+  };
+
+  const submitAdminDraftForReview = (draftId: string) => {
+    setState((prev) => ({
+      ...prev,
+      adminDrafts: (prev.adminDrafts || []).map((d) =>
+        d.id === draftId
+          ? {
+              ...d,
+              publicationStatus: 'PENDING_REVIEW',
+              updatedAt: '2026-11-24T08:20:00Z',
+              version: d.version + 1,
+            }
+          : d
+      ),
+    }));
+    showToast('Brouillon soumis pour validation éditoriale (PENDING_REVIEW).');
+  };
+
+  const publishAdminScholarshipDraft = (draftId: string, editorialNote?: string) => {
+    const targetDraft = (state.adminDrafts || []).find((d) => d.id === draftId);
+    if (!targetDraft) return;
+
+    const missing = computeMissingPublicationFields(targetDraft);
+    if (missing.length > 0) {
+      showToast(
+        `Publication refusée : veuillez compléter les champs obligatoires (${missing.join(', ')}).`
+      );
+      return;
+    }
+
+    const publishedScholarship: Scholarship = {
+      id: `sch-${Date.now()}`,
+      code: `ADM-2027-${Math.floor(100 + Math.random() * 900)}`,
+      title: targetDraft.title,
+      organizationId: targetDraft.issuerOrganizationId || 'org-1',
+      organizationName: targetDraft.issuerOrganizationName,
+      organizationType: 'Coopération internationale',
+      hostCountry: targetDraft.hostCountry,
+      fundingType: targetDraft.fundingType,
+      financialSummary: targetDraft.financialSummary,
+      deadline: targetDraft.deadline,
+      startDate: targetDraft.startDate,
+      durationMonths: targetDraft.durationMonths,
+      description: targetDraft.description,
+      benefits: targetDraft.benefits,
+      requiredDocuments: targetDraft.requiredDocuments,
+      criteria: targetDraft.criteria,
+      isDemoData: true,
+      sourceName: targetDraft.sourceName,
+      sourceUrl: targetDraft.sourceUrl,
+      retrievedAt: '2026-11-24',
+      lastVerifiedAt: '2026-11-24',
+      verifiedByCurator: currentUser.fullName,
+      curationStatus: 'VERIFIED',
+      status: 'OPEN',
+      publicationStatus: 'PUBLISHED',
+      acquisitionChannel: targetDraft.acquisitionChannel,
+      applicationUrl: targetDraft.applicationUrl,
+      createdBy: targetDraft.createdBy,
+      updatedAt: '2026-11-24T08:30:00Z',
+      version: targetDraft.version + 1,
+      modificationHistory: [
+        {
+          id: `mod-${Date.now()}`,
+          date: '2026-11-24',
+          actorName: currentUser.fullName,
+          actorRole: currentUser.role,
+          summary:
+            editorialNote ||
+            'Vérification de la source officielle et publication dans le catalogue public.',
+        },
+      ],
+    };
+
+    setState((prev) => {
+      const adminDrafts = (prev.adminDrafts || []).map((d) =>
+        d.id === draftId
+          ? { ...d, publicationStatus: 'PUBLISHED' as const, version: d.version + 1 }
+          : d
+      );
+      const auditLogs = appendAuditLog(
+        prev,
+        'CAMPAIGN_PUBLISHED',
+        publishedScholarship.title,
+        editorialNote || 'Publication d’une offre vérifiée depuis un brouillon administrateur.'
+      );
+      return {
+        ...prev,
+        adminDrafts,
+        scholarships: [publishedScholarship, ...prev.scholarships],
+        auditLogs,
+      };
+    });
+
+    showToast('Offre vérifiée et publiée dans le catalogue public des bourses.');
+  };
+
+  const archiveAdminScholarship = (idOrDraftId: string) => {
+    setState((prev) => {
+      const adminDrafts = (prev.adminDrafts || []).map((d) =>
+        d.id === idOrDraftId
+          ? { ...d, publicationStatus: 'ARCHIVED' as const, version: d.version + 1 }
+          : d
+      );
+      const scholarships = prev.scholarships.map((s) =>
+        s.id === idOrDraftId
+          ? {
+              ...s,
+              curationStatus: 'ARCHIVED' as const,
+              publicationStatus: 'ARCHIVED' as const,
+              status: 'EXPIRED' as const,
+            }
+          : s
+      );
+      return { ...prev, adminDrafts, scholarships };
+    });
+    showToast('Offre archivée et retirée de la liste publique.');
+  };
+
   const markNotificationRead = (notificationId: string) => {
     setState((prev) => ({
       ...prev,
@@ -762,7 +1465,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         switchDemoRole,
         logoutUser,
         resetDemoData,
+        apiConfig,
+        setApiMode,
+        fallbackToMockMode,
+        registerStudentAccount,
         updateStudentProfile,
+        addStudentAcademicRecord,
+        removeStudentAcademicRecord,
         toggleSavedScholarship,
         toggleInstitutionalVisibility,
         respondToInvitation,
@@ -770,16 +1479,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         evaluateForCurrentStudent,
         updateOrganizationProfile,
         createOrUpdateScholarship,
+        submitOrganizationScholarshipForCuration,
         sendInvitationToStudent,
         updateApplicationStatus,
         addOrganizationEvaluator,
         changeOrganizationPlan,
+        requestOrganizationPlanChange,
         curateScholarship,
+        createOfficialSource,
         updateSourceReliability,
         resolveDuplicate,
         toggleUserActiveStatus,
         changeUserRole,
         verifyOrganizationAccount,
+        decideSubscriptionRequest,
+        createAdminScholarshipDraft,
+        updateAdminScholarshipDraft,
+        submitAdminDraftForReview,
+        publishAdminScholarshipDraft,
+        archiveAdminScholarship,
         markNotificationRead,
         markAllNotificationsRead,
       }}
@@ -796,3 +1514,4 @@ export const useApp = (): AppContextValue => {
   }
   return ctx;
 };
+

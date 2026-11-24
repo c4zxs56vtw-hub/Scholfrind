@@ -459,7 +459,29 @@ export const CuratorAnnouncementsPage: React.FC = () => {
  * 3. SOURCES OFFICIELLES (/curateur/sources), DOUBLONS (/curateur/doublons) & HISTORIQUE (/curateur/historique)
  */
 export const CuratorSourcesPage: React.FC = () => {
-  const { sources, updateSourceReliability } = useApp();
+  const { sources, updateSourceReliability, createOfficialSource } = useApp();
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState('Ambassade / Coopération');
+  const [newCountry, setNewCountry] = useState('France');
+  const [newUrl, setNewUrl] = useState('https://');
+  const [newNotes, setNewNotes] = useState('');
+
+  const handleAddSource = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || !newUrl.trim()) return;
+    createOfficialSource({
+      name: newName,
+      institutionType: newType,
+      country: newCountry,
+      officialUrl: newUrl,
+      notes: newNotes,
+    });
+    setNewName('');
+    setNewUrl('https://');
+    setNewNotes('');
+    setAddModalOpen(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -467,6 +489,15 @@ export const CuratorSourcesPage: React.FC = () => {
         kicker="GESTION DE LA FIABILITÉ DES SOURCES"
         title="Registre des sources d’annonces"
         subtitle="Contrôlez la fiabilité des portails institutionnels (universités, ambassades, ministères, fondations)."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setAddModalOpen(true)}
+          >
+            + Enregistrer une source officielle
+          </Button>
+        }
       />
 
       <div className="space-y-4">
@@ -521,6 +552,108 @@ export const CuratorSourcesPage: React.FC = () => {
           </Panel>
         ))}
       </div>
+
+      <Modal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        title="Enregistrer une nouvelle source officielle (POST /curation/sources)"
+        subtitle="Ajoutez un portail institutionnel vérifiable au répertoire de surveillance."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setAddModalOpen(false)}
+            >
+              Annuler
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddSource}>
+              Enregistrer la source
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleAddSource} className="space-y-3 text-xs">
+          <div>
+            <label
+              htmlFor="src-new-name"
+              className="block font-medium text-[#253047] mb-1"
+            >
+              Nom officiel du portail ou de l’institution *
+            </label>
+            <input
+              id="src-new-name"
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Ex: DAAD Cameroun — Portail Bourses"
+              className="w-full px-3 py-2 bg-white border border-[#E6ECF5] rounded-xl"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor="src-new-type"
+                className="block font-medium text-[#253047] mb-1"
+              >
+                Type d’institution
+              </label>
+              <input
+                id="src-new-type"
+                type="text"
+                value={newType}
+                onChange={(e) => setNewType(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-[#E6ECF5] rounded-xl"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="src-new-country"
+                className="block font-medium text-[#253047] mb-1"
+              >
+                Pays *
+              </label>
+              <input
+                id="src-new-country"
+                type="text"
+                value={newCountry}
+                onChange={(e) => setNewCountry(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-[#E6ECF5] rounded-xl"
+              />
+            </div>
+          </div>
+          <div>
+            <label
+              htmlFor="src-new-url"
+              className="block font-medium text-[#253047] mb-1"
+            >
+              URL officielle *
+            </label>
+            <input
+              id="src-new-url"
+              type="url"
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-[#E6ECF5] rounded-xl font-mono"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="src-new-notes"
+              className="block font-medium text-[#253047] mb-1"
+            >
+              Notes de vérification
+            </label>
+            <textarea
+              id="src-new-notes"
+              rows={2}
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              className="w-full p-2.5 bg-white border border-[#E6ECF5] rounded-xl"
+            />
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

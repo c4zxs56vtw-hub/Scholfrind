@@ -44,6 +44,28 @@ export interface LanguageSkill {
   certification?: string; // ex: IELTS 6.5, TOEFL 95, TCF C1, Goethe B2
 }
 
+export interface AcademicRecord {
+  id: string;
+  diplomaLevel: AcademicLevel;
+  diplomaName: string;
+  institutionName: string;
+  institutionCountry?: string;
+  obtained: boolean;
+  completionYear?: number;
+  gradingScale?: GradingScale;
+  grade?: number | null;
+  normalizedGradeOut20?: number | null;
+  officialEquivalenceVerified?: boolean;
+  notes?: string;
+}
+
+export interface ProfileCompletion {
+  percentage: number;
+  missingFields: string[];
+  readyForEligibility: boolean;
+  instructions?: string[];
+}
+
 /**
  * Profil Étudiant
  * Distingue strictement :
@@ -84,14 +106,31 @@ export interface StudentProfile {
   // Confidentialité (Loi camerounaise n° 2024/017 du 23 décembre 2024)
   institutionalVisibilityEnabled: boolean; // Privé (false) par défaut
   visibilityConsentDate?: string;
+  visibilityConsentAt?: string;
+  visibilityRevokedAt?: string;
   allowAcademicScoreSharing: boolean;
   savedScholarshipIds: string[];
   updatedAt: string;
+
+  // Champs additifs OpenAPI 1.1 (diplômes multiples & complétude)
+  academicRecords?: AcademicRecord[];
+  profileCompletion?: ProfileCompletion;
 }
 
 export type CurationStatus = 'VERIFIED' | 'PENDING_REVIEW' | 'REJECTED' | 'ARCHIVED';
 
 export type ScholarshipStatus = 'OPEN' | 'CLOSING_SOON' | 'EXPIRED' | 'DRAFT';
+
+/**
+ * Cycle éditorial de publication (OpenAPI 1.1), distinct de la disponibilité (status)
+ * et du statut de validation documentaire (curationStatus).
+ */
+export type PublicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ARCHIVED';
+
+export type ScholarshipAcquisitionChannel =
+  | 'ADMIN_MANUAL'
+  | 'ORGANIZATION_SUBMISSION'
+  | 'AUTOMATED_IMPORT';
 
 export interface ScholarshipCriteria {
   eligibleNationalities: string[]; // ['Toutes'] ou liste ex: ['Cameroun', 'Sénégal', 'Côte d’Ivoire']
@@ -147,6 +186,14 @@ export interface Scholarship {
   status: ScholarshipStatus;
   modificationHistory: ModificationRecord[];
   duplicateSuspectOfId?: string;
+
+  // Champs additifs OpenAPI 1.1 (cycle éditorial et canal d'acquisition)
+  publicationStatus?: PublicationStatus;
+  acquisitionChannel?: ScholarshipAcquisitionChannel;
+  applicationUrl?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  version?: number;
 }
 
 export type EligibilityGlobalVerdict =
@@ -337,3 +384,125 @@ export interface CommercialSubscription {
   startedAt: string;
   nextRenewalAt?: string;
 }
+
+/**
+ * Nouveaux modèles métier OpenAPI 1.1 (Brouillons Admin, Extraction IA, Collecte, Campagnes, Demandes d'abonnement)
+ */
+export interface ScholarshipDraft {
+  id: string;
+  title: string;
+  publicationStatus: PublicationStatus;
+  acquisitionChannel: ScholarshipAcquisitionChannel;
+  issuerOrganizationId?: string;
+  issuerOrganizationName: string;
+  hostCountry: string;
+  fundingType: FundingType;
+  financialSummary: string;
+  deadline: string;
+  startDate: string;
+  durationMonths: number;
+  description: string;
+  benefits: string[];
+  requiredDocuments: string[];
+  criteria: ScholarshipCriteria;
+  sourceName: string;
+  sourceUrl: string;
+  applicationUrl?: string;
+  internalNotes?: string;
+  missingPublicationFields: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface AiExtractionEvidence {
+  field: string;
+  sourceUrl: string;
+  excerpt: string;
+  confidenceLabel: 'HIGH' | 'MEDIUM' | 'LOW';
+}
+
+export interface AiExtractionResult {
+  extractionId: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  draft: {
+    title?: string;
+    issuerOrganizationName?: string;
+    hostCountry?: string;
+    targetStudyLevels?: AcademicLevel[];
+    fundingType?: FundingType;
+    deadline?: string;
+    criteria?: ScholarshipCriteria;
+    financialSummary?: string;
+    description?: string;
+    sourceUrl?: string;
+  };
+  evidence: AiExtractionEvidence[];
+  missingFields: string[];
+  warnings: string[];
+  model: string;
+  promptVersion: string;
+  createdAt: string;
+  completedAt?: string;
+  requiresHumanReview: true;
+  isMockSimulation?: boolean;
+}
+
+export type IngestionJobStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'PARTIALLY_COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface IngestionJob {
+  jobId: string;
+  status: IngestionJobStatus;
+  requestedBy: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  scannedCount: number;
+  importedDraftCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  warnings: string[];
+  dryRun: boolean;
+  isMockSimulation?: boolean;
+}
+
+export type OrganizationCampaignStatus =
+  | 'DRAFT'
+  | 'PENDING_REVIEW'
+  | 'ACTIVE'
+  | 'CLOSED'
+  | 'ARCHIVED';
+
+export interface OrganizationCampaign {
+  id: string;
+  scholarshipId: string;
+  organizationId: string;
+  title: string;
+  status: OrganizationCampaignStatus;
+  applicationDeadline?: string;
+  slotsAvailable?: number;
+  createdAt: string;
+  updatedAt?: string;
+  notes?: string;
+}
+
+export interface SubscriptionRequest {
+  id: string;
+  organizationId: string;
+  organizationName?: string;
+  requestedPlan: PlanTierId;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  requestedAt: string;
+  decidedAt?: string;
+  activationConfirmed: boolean;
+  requestNote?: string;
+  decisionReason?: string;
+}
+

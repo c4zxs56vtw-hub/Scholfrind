@@ -1,0 +1,19 @@
+{
+  "source": "scholarfind-api.yaml",
+  "source_paths": 38,
+  "source_operations": 44,
+  "source_schemas": 48,
+  "new_paths": 72,
+  "new_operations": 92,
+  "new_schemas": 90,
+  "all_old_paths_operation_ids_preserved": true,
+  "all_old_schema_required_and_enums_preserved": true,
+  "all_internal_refs_resolve": true,
+  "independent_yaml_parse_ok": true,
+  "formal_OpenAPI_schema_validation": "pending",
+  "frontend_integration_testing": "not possible without codebase",
+  "pydantic_openapi_models_structure": "OK (FastAPI OpenAPI model, not full spec lint)",
+  "role_enum_consistency": "OK",
+  "success_response_all_operations": "OK",
+  "four_existing_eligibility_verdicts_unchanged": "OK"
+}

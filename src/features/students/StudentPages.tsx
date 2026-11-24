@@ -344,7 +344,13 @@ export const StudentDashboardPage: React.FC = () => {
     };
 
     return scholarships
-      .filter((s) => s.status !== 'EXPIRED')
+      .filter(
+        (s) =>
+          s.status !== 'EXPIRED' &&
+          s.status !== 'DRAFT' &&
+          s.curationStatus !== 'ARCHIVED' &&
+          (!s.publicationStatus || s.publicationStatus === 'PUBLISHED')
+      )
       .map((s) => {
         const report = evaluateForCurrentStudent(s);
         const matchesDomain =
@@ -777,8 +783,22 @@ export const StudentDashboardPage: React.FC = () => {
  * - Modifier mon profil : formulaire progressif en 4 étapes lorsque ?mode=edit ou ?step= est actif.
  */
 export const StudentProfilePage: React.FC = () => {
-  const { currentStudent, updateStudentProfile } = useApp();
+  const {
+    currentStudent,
+    updateStudentProfile,
+    addStudentAcademicRecord,
+    removeStudentAcademicRecord,
+  } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [isAddDiplomaOpen, setIsAddDiplomaOpen] = useState(false);
+  const [newDiplomaLevel, setNewDiplomaLevel] =
+    useState<AcademicLevel>('Licence');
+  const [newDiplomaTitle, setNewDiplomaTitle] = useState('');
+  const [newDiplomaInstitution, setNewDiplomaInstitution] = useState('');
+  const [newDiplomaYear, setNewDiplomaYear] = useState('2025');
+  const [newDiplomaGrade, setNewDiplomaGrade] = useState('15.2');
+  const [newDiplomaScale, setNewDiplomaScale] =
+    useState<GradingScale>('SUR_20');
 
   const isEditMode =
     searchParams.get('mode') === 'edit' || searchParams.has('step');
@@ -1284,6 +1304,191 @@ export const StudentProfilePage: React.FC = () => {
               </dd>
             </div>
           </dl>
+
+          {/* Diplômes enregistrés (/students/me/academic-records — OpenAPI 1.1) */}
+          <div className="pt-4 border-t border-[#E6ECF5] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold text-[#203454]">
+                  Diplômes enregistrés ({currentStudent.academicRecords?.length || 0})
+                </h3>
+                <p className="text-[11px] text-[#69768C]">
+                  Historique de tes diplômes validés pris en compte pour l’éligibilité académique.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsAddDiplomaOpen((prev) => !prev)}
+              >
+                {isAddDiplomaOpen ? 'Fermer' : '+ Ajouter un diplôme'}
+              </Button>
+            </div>
+
+            {isAddDiplomaOpen && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newDiplomaTitle.trim() || !newDiplomaInstitution.trim()) {
+                    return;
+                  }
+                  const parsedG = parseFloat(newDiplomaGrade);
+                  addStudentAcademicRecord({
+                    diplomaLevel: newDiplomaLevel,
+                    diplomaName: newDiplomaTitle.trim(),
+                    institutionName: newDiplomaInstitution.trim(),
+                    institutionCountry:
+                      currentStudent.residenceCountry || 'Cameroun',
+                    obtained: true,
+                    completionYear: parseInt(newDiplomaYear, 10) || 2025,
+                    gradingScale: newDiplomaScale,
+                    grade: Number.isNaN(parsedG) ? null : parsedG,
+                  });
+                  setNewDiplomaTitle('');
+                  setNewDiplomaInstitution('');
+                  setIsAddDiplomaOpen(false);
+                }}
+                className="p-3.5 bg-[#F8FAFD] border border-[#E6ECF5] rounded-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs"
+              >
+                <div>
+                  <label className="block font-medium text-[#253047] mb-1">
+                    Niveau du diplôme *
+                  </label>
+                  <select
+                    value={newDiplomaLevel}
+                    onChange={(e) =>
+                      setNewDiplomaLevel(e.target.value as AcademicLevel)
+                    }
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg"
+                  >
+                    {ACADEMIC_LEVELS.map((lvl) => (
+                      <option key={lvl} value={lvl}>
+                        {lvl}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-medium text-[#253047] mb-1">
+                    Intitulé du diplôme *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newDiplomaTitle}
+                    onChange={(e) => setNewDiplomaTitle(e.target.value)}
+                    placeholder="Ex: Baccalauréat C / Licence Informatique"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-[#253047] mb-1">
+                    Établissement *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newDiplomaInstitution}
+                    onChange={(e) => setNewDiplomaInstitution(e.target.value)}
+                    placeholder="Ex: Université de Yaoundé I"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-[#253047] mb-1">
+                    Année d’obtention
+                  </label>
+                  <input
+                    type="number"
+                    value={newDiplomaYear}
+                    onChange={(e) => setNewDiplomaYear(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg tabular-nums"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-[#253047] mb-1">
+                    Moyenne obtenue
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={newDiplomaGrade}
+                    onChange={(e) => setNewDiplomaGrade(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg tabular-nums"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block font-medium text-[#253047] mb-1">
+                      Échelle
+                    </label>
+                    <select
+                      value={newDiplomaScale}
+                      onChange={(e) =>
+                        setNewDiplomaScale(e.target.value as GradingScale)
+                      }
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#E6ECF5] rounded-lg"
+                    >
+                      <option value="SUR_20">Sur 20</option>
+                      <option value="GPA_4">GPA 4.0</option>
+                      <option value="POURCENTAGE_100">/ 100 %</option>
+                    </select>
+                  </div>
+                  <Button type="submit" variant="primary" size="sm">
+                    Enregistrer
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {currentStudent.academicRecords &&
+            currentStudent.academicRecords.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {currentStudent.academicRecords.map((rec) => (
+                  <div
+                    key={rec.id}
+                    className="p-3 bg-[#F8FAFD] border border-[#E6ECF5] rounded-xl flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-[#3457D5]/10 text-[#3457D5] font-bold text-[11px]">
+                          {rec.diplomaLevel}
+                        </span>
+                        <span className="font-bold text-[#203454] truncate">
+                          {rec.diplomaName}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#69768C] mt-1">
+                        {rec.institutionName} · {rec.completionYear || 'Validé'}
+                        {rec.grade !== null && rec.grade !== undefined
+                          ? ` · Moyenne : ${rec.grade}${
+                              rec.gradingScale === 'SUR_20'
+                                ? '/20'
+                                : rec.gradingScale === 'GPA_4'
+                                ? '/4.0'
+                                : '%'
+                            }`
+                          : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeStudentAcademicRecord(rec.id)}
+                      aria-label={`Supprimer le diplôme ${rec.diplomaName}`}
+                      className="p-1.5 text-[#69768C] hover:text-[#B42318] transition-colors cursor-pointer shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-[#69768C]">
+                Aucun diplôme détaillé enregistré pour le moment.
+              </p>
+            )}
+          </div>
         </section>
 
         {/* SECTION 3 : PROJET D'ÉTUDES */}
@@ -2135,7 +2340,13 @@ export const StudentRecommendationsPage: React.FC = () => {
 
   const evaluatedRecommendations = useMemo(() => {
     return scholarships
-      .filter((s) => s.status !== 'EXPIRED')
+      .filter(
+        (s) =>
+          s.status !== 'EXPIRED' &&
+          s.status !== 'DRAFT' &&
+          s.curationStatus !== 'ARCHIVED' &&
+          (!s.publicationStatus || s.publicationStatus === 'PUBLISHED')
+      )
       .map((s) => {
         const report = evaluateForCurrentStudent(s);
 
