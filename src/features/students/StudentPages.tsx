@@ -44,6 +44,7 @@ import {
   LanguageSkill,
   StudyDomain,
 } from '../../types';
+import { MobileExpandableSearch } from './MobileExpandableSearch';
 
 /**
  * Sous-navigation de la rubrique « Pour moi »
@@ -424,14 +425,30 @@ export const StudentDashboardPage: React.FC = () => {
     <div className="space-y-6">
       {/* 1. ACCUEIL & RECHERCHE PRINCIPALE */}
       <section className="space-y-4">
-        <h1 className="text-2xl sm:text-3xl font-sans font-bold text-[#203454] tracking-tight">
-          Trouvons la bourse qui te correspond.
-        </h1>
+        {/* Version Mobile (< 768px) : Barre de recherche rétractable et animée */}
+        <MobileExpandableSearch
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          quickLevel={quickLevel}
+          onQuickLevelChange={setQuickLevel}
+          quickDomain={quickDomain}
+          onQuickDomainChange={setQuickDomain}
+          quickCountry={quickCountry}
+          onQuickCountryChange={setQuickCountry}
+          availableCountries={availableCountries}
+          onSubmitSearch={handleSearchSubmit}
+        />
 
-        <div
-          aria-label="Recherche principale de bourses"
-          className="bg-white border border-[#E6ECF5] rounded-2xl p-4 sm:p-5 shadow-xs"
-        >
+        {/* Version Tablette et Ordinateur (>= 768px) : Disposition actuelle inchangée */}
+        <div className="hidden md:block space-y-4">
+          <h1 className="text-2xl sm:text-3xl font-sans font-bold text-[#203454] tracking-tight">
+            Trouvons la bourse qui te correspond.
+          </h1>
+
+          <div
+            aria-label="Recherche principale de bourses"
+            className="bg-white border border-[#E6ECF5] rounded-2xl p-4 sm:p-5 shadow-xs"
+          >
           <form onSubmit={handleSearchSubmit} className="space-y-3">
             <div className="flex flex-col sm:flex-row gap-2.5">
               <div className="relative flex-1">
@@ -501,6 +518,7 @@ export const StudentDashboardPage: React.FC = () => {
               </select>
             </div>
           </form>
+          </div>
         </div>
       </section>
 

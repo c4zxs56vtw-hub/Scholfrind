@@ -2,5 +2,7 @@
   "name": "SCHOLARFIND",
   "description": "Système automatisé de recherche, de recommandation et de vérification d'éligibilité aux bourses d'études B2B2C.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
