@@ -15,6 +15,8 @@ import {
   OfficialSource,
   OrganizationCampaign,
   OrganizationProfile,
+  PartnerOrganizationRequest,
+  PartnerRequestStatus,
   PlanTierId,
   Scholarship,
   ScholarshipDraft,
@@ -51,6 +53,12 @@ import {
   computeStudentProfileCompletion,
   inferPublicationStatus,
 } from '../api/adapters/openapiAdapters';
+import {
+  adaptPartnerUiTypeToOpenApi,
+  enforcePublicRegistrationRole,
+  getPartnerRequestStatusLabel,
+  isPartnerSubmissionLocked,
+} from '../features/auth/authAndPartnerLogic';
 
 const STORAGE_KEY = 'scholarfind_demo_state_v1';
 
@@ -74,6 +82,137 @@ const INITIAL_MOCK_INGESTION_JOBS: IngestionJob[] = [
   },
 ];
 
+const INITIAL_PARTNER_ORGANIZATION_REQUESTS: PartnerOrganizationRequest[] = [
+  {
+    id: 'preq-demo-101',
+    applicantUserId: 'usr-stu-2',
+    applicantStudentId: 'stu-2',
+    applicantFullName: 'Samuel Eto’o Ndi',
+    applicantEmail: 'samuel.ndi@univ-yaounde1.cm',
+    status: 'UNDER_REVIEW',
+    officialName: 'Fondation Horizon Sciences & Technologies Cameroun',
+    organizationType: 'Fondation',
+    country: 'Cameroun',
+    city: 'Yaoundé',
+    address: 'Avenue Kennedy, Immeuble Horizon, BP 1420 Yaoundé',
+    website: 'https://fondation-horizon-sciences.cm',
+    description:
+      'Fondation reconnue d’utilité publique dédiée au financement de bourses d’études en ingénierie numérique, énergies renouvelables et santé publique pour les diplômés d’Afrique Centrale.',
+    professionalEmail: 'direction@fondation-horizon-sciences.cm',
+    professionalPhone: '+237 699 42 18 05',
+    representativeName: 'Samuel Eto’o Ndi',
+    representativeRole: 'Chargé des Programmes Académiques & Bourses',
+    requestMotivation:
+      'Ouverture de la campagne annuelle de 15 bourses de Master 2027-2028 et présélection de candidats qualifiés via SCHOLARFIND.',
+    legalRegistrationNumber: 'MINAT-FOND-2024-0892-CM',
+    documents: [
+      {
+        id: 'doc-preq-101-1',
+        category: 'LEGAL_EXISTENCE',
+        fileName: 'Arrete_Reconnaissance_MINAT_Horizon_2024.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 428500,
+        uploadedAt: '2026-11-20',
+        confidentialPreviewSummary:
+          'Arrêté ministériel n° 0892/MINAT attestant l’existence légale de la Fondation Horizon Sciences & Technologies Cameroun (Signé le 14/03/2024).',
+      },
+      {
+        id: 'doc-preq-101-2',
+        category: 'REPRESENTATIVE_AUTHORIZATION',
+        fileName: 'Mandat_Representation_Samuel_Ndi_2026.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 215400,
+        uploadedAt: '2026-11-20',
+        confidentialPreviewSummary:
+          'Délégation officielle de signature du Conseil d’Administration autorisant M. Samuel Eto’o Ndi à administrer l’espace partenaire SCHOLARFIND.',
+      },
+    ],
+    createdAt: '2026-11-20T10:15:00Z',
+    updatedAt: '2026-11-21T14:30:00Z',
+    submittedAt: '2026-11-20T10:30:00Z',
+    decisionHistory: [
+      {
+        id: 'dec-101-1',
+        decidedAt: '2026-11-20 10:30',
+        actorName: 'Samuel Eto’o Ndi',
+        actorRole: 'STUDENT',
+        previousStatus: 'DRAFT',
+        newStatus: 'SUBMITTED',
+        note: 'Soumission initiale du dossier et des justificatifs légaux.',
+      },
+      {
+        id: 'dec-101-2',
+        decidedAt: '2026-11-21 14:30',
+        actorName: 'Jean-Paul Mbarga (Admin)',
+        actorRole: 'ADMIN',
+        previousStatus: 'SUBMITTED',
+        newStatus: 'UNDER_REVIEW',
+        note: 'Prise en charge du dossier pour contrôle du numéro d’enregistrement MINAT.',
+      },
+    ],
+  },
+  {
+    id: 'preq-demo-102',
+    applicantUserId: 'usr-stu-3',
+    applicantStudentId: 'stu-3',
+    applicantFullName: 'Clarisse Biya Tchoumi',
+    applicantEmail: 'clarisse.tchoumi@essec-douala.cm',
+    status: 'MORE_INFO_REQUIRED',
+    officialName: 'Consortium Africain pour l’AgriTech Durable (CAAD)',
+    organizationType: 'ONG',
+    country: 'Cameroun',
+    city: 'Douala',
+    address: 'Rue Joss, Bonanjo, BP 3310 Douala',
+    website: 'https://caad-agritech.org',
+    description:
+      'Organisation non gouvernementale accompagnant les étudiants chercheurs en agronomie tropicale et résilience climatique.',
+    professionalEmail: 'bourses@caad-agritech.org',
+    professionalPhone: '+237 677 88 12 90',
+    representativeName: 'Clarisse Biya Tchoumi',
+    representativeRole: 'Coordinatrice Régionale des Partenariats Universitaires',
+    requestMotivation:
+      'Publication de 8 bourses de recherche appliquée en agronomie et gestion durable des sols.',
+    legalRegistrationNumber: 'ONG-LT-2023-4410',
+    documents: [
+      {
+        id: 'doc-preq-102-1',
+        category: 'LEGAL_EXISTENCE',
+        fileName: 'Recepisse_Declaration_CAAD_Douala.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 312000,
+        uploadedAt: '2026-11-18',
+        confidentialPreviewSummary:
+          'Récépissé de déclaration d’association n° 4410 délivré par la Préfecture du Wouri.',
+      },
+    ],
+    createdAt: '2026-11-18T09:00:00Z',
+    updatedAt: '2026-11-19T16:45:00Z',
+    submittedAt: '2026-11-18T09:20:00Z',
+    adminFeedbackNote:
+      'Merci de joindre le justificatif d’autorisation ou mandat nominatif signé par la Direction Générale du CAAD désignant Mme Clarisse Biya Tchoumi comme représentante.',
+    decisionHistory: [
+      {
+        id: 'dec-102-1',
+        decidedAt: '2026-11-18 09:20',
+        actorName: 'Clarisse Biya Tchoumi',
+        actorRole: 'STUDENT',
+        previousStatus: 'DRAFT',
+        newStatus: 'SUBMITTED',
+        note: 'Soumission de la demande partenaire.',
+      },
+      {
+        id: 'dec-102-2',
+        decidedAt: '2026-11-19 16:45',
+        actorName: 'Jean-Paul Mbarga (Admin)',
+        actorRole: 'ADMIN',
+        previousStatus: 'SUBMITTED',
+        newStatus: 'MORE_INFO_REQUIRED',
+        note: 'Merci de joindre le justificatif d’autorisation ou mandat nominatif signé par la Direction Générale du CAAD.',
+      },
+    ],
+  },
+];
+
 interface PersistedState {
   currentUserId: string;
   isAuthenticated?: boolean;
@@ -88,11 +227,12 @@ interface PersistedState {
   notifications: AppNotification[];
   subscriptions: CommercialSubscription[];
   auditLogs: AuditLogEntry[];
-  // Collections additives OpenAPI 1.1
+  // Collections additives OpenAPI 1.1 & Gouvernance Partenaires
   adminDrafts?: ScholarshipDraft[];
   ingestionJobs?: IngestionJob[];
   organizationCampaigns?: OrganizationCampaign[];
   subscriptionRequests?: SubscriptionRequest[];
+  partnerRequests?: PartnerOrganizationRequest[];
 }
 
 interface AppContextValue extends PersistedState {
@@ -111,6 +251,42 @@ interface AppContextValue extends PersistedState {
   apiConfig: ApiRuntimeConfig;
   setApiMode: (mode: ApiIntegrationMode, baseUrl?: string) => void;
   fallbackToMockMode: () => void;
+
+  // Authentification professionnelle, Inscription publique unique (STUDENT) & Basculement d'espace
+  authenticateUser: (
+    email: string,
+    password: string,
+    rememberMe?: boolean
+  ) => Promise<{ success: boolean; user?: UserAccount; error?: string }>;
+  registerPublicStudentAccount: (payload: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    acceptedTerms: boolean;
+    acceptedPrivacy: boolean;
+  }) => Promise<{
+    success: boolean;
+    user?: UserAccount;
+    requiresEmailVerification: boolean;
+    error?: string;
+  }>;
+  verifyCurrentStudentEmail: () => void;
+  switchAuthorizedWorkspace: (targetRole: 'STUDENT' | 'ORGANIZATION') => boolean;
+
+  // Demande de création d'un compte organisme partenaire (Espace Étudiant & Admin)
+  partnerRequests: PartnerOrganizationRequest[];
+  savePartnerOrganizationRequestDraft: (
+    patch: Partial<PartnerOrganizationRequest>
+  ) => PartnerOrganizationRequest;
+  submitPartnerOrganizationRequest: (
+    patch: Partial<PartnerOrganizationRequest>
+  ) => { success: boolean; request?: PartnerOrganizationRequest; error?: string };
+  decidePartnerOrganizationRequest: (
+    requestId: string,
+    newStatus: 'UNDER_REVIEW' | 'MORE_INFO_REQUIRED' | 'APPROVED' | 'REJECTED',
+    note: string
+  ) => void;
 
   // Inscription conforme OpenAPI 1.1 (profil étudiant autorisé même si parcours académique incomplet)
   registerStudentAccount: (payload: {
@@ -228,6 +404,16 @@ const enrichScholarshipsWithPublicationStatus = (scholarships: Scholarship[]): S
     acquisitionChannel: s.acquisitionChannel || 'ADMIN_MANUAL',
   }));
 
+const enrichUsersWithPermissions = (users: UserAccount[]): UserAccount[] =>
+  users.map((u) => ({
+    ...u,
+    grantedRoles: u.grantedRoles && u.grantedRoles.length > 0 ? u.grantedRoles : [u.role],
+    linkedStudentId: u.linkedStudentId || (u.role === 'STUDENT' ? u.linkedEntityId : undefined),
+    linkedOrganizationId:
+      u.linkedOrganizationId || (u.role === 'ORGANIZATION' ? u.linkedEntityId : undefined),
+    emailVerified: u.emailVerified !== undefined ? u.emailVerified : true,
+  }));
+
 const getInitialState = (): PersistedState => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -249,6 +435,7 @@ const getInitialState = (): PersistedState => {
         );
         return {
           ...parsed,
+          users: enrichUsersWithPermissions(parsed.users as UserAccount[]),
           students: enrichStudentsWithCompletion(parsed.students as StudentProfile[]),
           scholarships: sanitizedScholarships,
           isAuthenticated: parsed.isAuthenticated !== undefined ? parsed.isAuthenticated : true,
@@ -256,6 +443,7 @@ const getInitialState = (): PersistedState => {
           ingestionJobs: parsed.ingestionJobs || INITIAL_MOCK_INGESTION_JOBS,
           organizationCampaigns: parsed.organizationCampaigns || [],
           subscriptionRequests: parsed.subscriptionRequests || [],
+          partnerRequests: parsed.partnerRequests || INITIAL_PARTNER_ORGANIZATION_REQUESTS,
         };
       }
     }
@@ -265,7 +453,7 @@ const getInitialState = (): PersistedState => {
   return {
     currentUserId: 'usr-stu-1',
     isAuthenticated: true,
-    users: INITIAL_USER_ACCOUNTS,
+    users: enrichUsersWithPermissions(INITIAL_USER_ACCOUNTS),
     students: enrichStudentsWithCompletion(INITIAL_STUDENT_PROFILES),
     organizations: INITIAL_ORGANIZATIONS,
     scholarships: enrichScholarshipsWithPublicationStatus(INITIAL_SCHOLARSHIPS),
@@ -280,6 +468,7 @@ const getInitialState = (): PersistedState => {
     ingestionJobs: INITIAL_MOCK_INGESTION_JOBS,
     organizationCampaigns: [],
     subscriptionRequests: [],
+    partnerRequests: INITIAL_PARTNER_ORGANIZATION_REQUESTS,
   };
 };
 
@@ -331,15 +520,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const currentStudent = useMemo(
     () =>
-      state.students.find((s) => s.id === currentUser.linkedEntityId) ||
-      state.students[0],
+      state.students.find(
+        (s) =>
+          s.id === currentUser.linkedStudentId ||
+          s.id === currentUser.linkedEntityId ||
+          s.userId === currentUser.id
+      ) || state.students[0],
     [state.students, currentUser]
   );
 
   const currentOrganization = useMemo(
     () =>
-      state.organizations.find((o) => o.id === currentUser.linkedEntityId) ||
-      state.organizations[0],
+      state.organizations.find(
+        (o) =>
+          o.id === currentUser.linkedOrganizationId ||
+          o.id === currentUser.linkedEntityId ||
+          o.userId === currentUser.id
+      ) || state.organizations[0],
     [state.organizations, currentUser]
   );
 
@@ -388,7 +585,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setState({
       currentUserId: 'usr-stu-1',
       isAuthenticated: true,
-      users: INITIAL_USER_ACCOUNTS,
+      users: enrichUsersWithPermissions(INITIAL_USER_ACCOUNTS),
       students: enrichStudentsWithCompletion(INITIAL_STUDENT_PROFILES),
       organizations: INITIAL_ORGANIZATIONS,
       scholarships: enrichScholarshipsWithPublicationStatus(INITIAL_SCHOLARSHIPS),
@@ -403,8 +600,551 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ingestionJobs: INITIAL_MOCK_INGESTION_JOBS,
       organizationCampaigns: [],
       subscriptionRequests: [],
+      partnerRequests: INITIAL_PARTNER_ORGANIZATION_REQUESTS,
     });
     showToast('Données de démonstration réinitialisées à leur état initial.');
+  };
+
+  /**
+   * Connexion professionnelle (POST /auth/login) :
+   * - Aucune sélection de rôle avant connexion.
+   * - Le rôle et les permissions (`grantedRoles`) sont résolus depuis le compte retourné.
+   */
+  const authenticateUser: AppContextValue['authenticateUser'] = async (
+    email,
+    password,
+    _rememberMe
+  ) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      return {
+        success: false,
+        error: 'Veuillez renseigner votre adresse email et votre mot de passe.',
+      };
+    }
+
+    const matchedUser = state.users.find(
+      (u) => u.email.trim().toLowerCase() === normalizedEmail
+    );
+
+    if (!matchedUser || password.length < 4) {
+      return {
+        success: false,
+        error:
+          'Identifiants incorrects. Vérifiez votre adresse email et votre mot de passe.',
+      };
+    }
+
+    if (!matchedUser.active) {
+      return {
+        success: false,
+        error:
+          'Ce compte est actuellement suspendu par un administrateur. Contactez le support SCHOLARFIND.',
+      };
+    }
+
+    const updatedUser: UserAccount = {
+      ...matchedUser,
+      lastLoginAt: '2026-11-24',
+      grantedRoles:
+        matchedUser.grantedRoles && matchedUser.grantedRoles.length > 0
+          ? matchedUser.grantedRoles
+          : [matchedUser.role],
+    };
+
+    setState((prev) => ({
+      ...prev,
+      currentUserId: updatedUser.id,
+      isAuthenticated: true,
+      users: prev.users.map((u) => (u.id === updatedUser.id ? updatedUser : u)),
+    }));
+
+    showToast(`Bienvenue, ${updatedUser.fullName}.`);
+    return {
+      success: true,
+      user: updatedUser,
+    };
+  };
+
+  /**
+   * Inscription publique unique (POST /auth/register/student) :
+   * - Attribue TOUJOURS le rôle STUDENT (via enforcePublicRegistrationRole()).
+   * - Ne permet jamais l'inscription publique directe en ORGANIZATION, CURATOR ou ADMIN.
+   */
+  const registerPublicStudentAccount: AppContextValue['registerPublicStudentAccount'] = async (
+    payload
+  ) => {
+    const cleanEmail = payload.email.trim().toLowerCase();
+    if (!payload.firstName.trim() || !payload.lastName.trim() || !cleanEmail) {
+      return {
+        success: false,
+        requiresEmailVerification: false,
+        error: 'Veuillez remplir votre nom, prénom et adresse email.',
+      };
+    }
+
+    if (!payload.acceptedTerms || !payload.acceptedPrivacy) {
+      return {
+        success: false,
+        requiresEmailVerification: false,
+        error:
+          'Vous devez accepter les conditions d’utilisation et la politique de confidentialité.',
+      };
+    }
+
+    const emailAlreadyExists = state.users.some(
+      (u) => u.email.trim().toLowerCase() === cleanEmail
+    );
+    if (emailAlreadyExists) {
+      return {
+        success: false,
+        requiresEmailVerification: false,
+        error:
+          'Un compte existe déjà avec cette adresse email. Connectez-vous ou réinitialisez votre mot de passe.',
+      };
+    }
+
+    const assignedRole = enforcePublicRegistrationRole(); // Toujours 'STUDENT'
+    const newStuId = `stu-${Date.now()}`;
+    const newUserId = `usr-stu-${Date.now()}`;
+
+    const newStudent: StudentProfile = {
+      id: newStuId,
+      userId: newUserId,
+      firstName: payload.firstName.trim(),
+      lastName: payload.lastName.trim(),
+      email: payload.email.trim(),
+      isMinor: false,
+      nationality: 'Cameroun',
+      residenceCountry: 'Cameroun',
+      city: '',
+      highestDiplomaObtained: '',
+      highestDiplomaName: '',
+      currentStudyLevel: '',
+      targetStudyLevel: '',
+      studyDomain: '',
+      currentInstitution: '',
+      academicYear: '2026-2027',
+      averageGrade: null,
+      gradingScale: 'SUR_20',
+      normalizedGradeOut20: null,
+      languages: [{ language: 'Français', level: 'C1' }],
+      preferredDestinationCountries: [],
+      preferredFundingTypes: [],
+      institutionalVisibilityEnabled: false,
+      allowAcademicScoreSharing: false,
+      savedScholarshipIds: [],
+      updatedAt: '2026-11-24',
+      academicRecords: [],
+    };
+    newStudent.profileCompletion = computeStudentProfileCompletion(newStudent);
+
+    const newUser: UserAccount = {
+      id: newUserId,
+      email: payload.email.trim(),
+      fullName: `${payload.firstName.trim()} ${payload.lastName.trim()}`,
+      role: assignedRole,
+      grantedRoles: [assignedRole],
+      active: true,
+      createdAt: '2026-11-24',
+      lastLoginAt: '2026-11-24',
+      linkedEntityId: newStuId,
+      linkedStudentId: newStuId,
+      emailVerified: false,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      currentUserId: newUserId,
+      isAuthenticated: true,
+      users: [newUser, ...prev.users],
+      students: [newStudent, ...prev.students],
+    }));
+
+    return {
+      success: true,
+      user: newUser,
+      requiresEmailVerification: true,
+    };
+  };
+
+  const verifyCurrentStudentEmail = () => {
+    setState((prev) => ({
+      ...prev,
+      users: prev.users.map((u) =>
+        u.id === prev.currentUserId ? { ...u, emailVerified: true } : u
+      ),
+    }));
+    showToast('Adresse email vérifiée avec succès. Bienvenue dans votre espace étudiant.');
+  };
+
+  /**
+   * Basculement entre l'Espace Étudiant et l'Espace Organisme :
+   * Autorisé uniquement lorsque le backend / l'administrateur a accordé les deux permissions
+   * (`grantedRoles` contient 'STUDENT' et 'ORGANIZATION').
+   */
+  const switchAuthorizedWorkspace = (targetRole: 'STUDENT' | 'ORGANIZATION'): boolean => {
+    const allowedRoles = currentUser.grantedRoles || [currentUser.role];
+    if (!allowedRoles.includes(targetRole)) {
+      showToast(
+        'Accès refusé : votre compte ne dispose pas encore des permissions pour cet espace.'
+      );
+      return false;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      users: prev.users.map((u) => {
+        if (u.id !== prev.currentUserId) return u;
+        const nextLinkedEntityId =
+          targetRole === 'ORGANIZATION'
+            ? u.linkedOrganizationId || u.linkedEntityId
+            : u.linkedStudentId || u.linkedEntityId;
+        return {
+          ...u,
+          role: targetRole,
+          linkedEntityId: nextLinkedEntityId,
+        };
+      }),
+    }));
+
+    showToast(
+      targetRole === 'ORGANIZATION'
+        ? 'Basculement vers votre Espace Organisme Partenaire effectué.'
+        : 'Basculement vers votre Espace Étudiant effectué.'
+    );
+    return true;
+  };
+
+  /**
+   * Enregistrement en brouillon d'une demande de création de compte organisme partenaire
+   */
+  const savePartnerOrganizationRequestDraft: AppContextValue['savePartnerOrganizationRequestDraft'] = (
+    patch
+  ) => {
+    const existing = (state.partnerRequests || []).find(
+      (r) => r.applicantUserId === currentUser.id
+    );
+    const nowIso = '2026-11-24T10:00:00Z';
+
+    const draftRequest: PartnerOrganizationRequest = existing
+      ? {
+          ...existing,
+          ...patch,
+          status:
+            existing.status === 'MORE_INFO_REQUIRED'
+              ? 'MORE_INFO_REQUIRED'
+              : 'DRAFT',
+          updatedAt: nowIso,
+        }
+      : {
+          id: `preq-${Date.now()}`,
+          applicantUserId: currentUser.id,
+          applicantStudentId: currentStudent.id,
+          applicantFullName: currentUser.fullName,
+          applicantEmail: currentUser.email,
+          status: 'DRAFT',
+          officialName: patch.officialName || '',
+          organizationType: patch.organizationType || 'Fondation',
+          country: patch.country || 'Cameroun',
+          city: patch.city || '',
+          address: patch.address || '',
+          website: patch.website || '',
+          description: patch.description || '',
+          professionalEmail: patch.professionalEmail || '',
+          professionalPhone: patch.professionalPhone || '',
+          representativeName: patch.representativeName || currentUser.fullName,
+          representativeRole: patch.representativeRole || '',
+          requestMotivation: patch.requestMotivation || '',
+          legalRegistrationNumber: patch.legalRegistrationNumber || '',
+          documents: patch.documents || [],
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          decisionHistory: [],
+        };
+
+    setState((prev) => {
+      const others = (prev.partnerRequests || []).filter(
+        (r) => r.applicantUserId !== currentUser.id
+      );
+      return {
+        ...prev,
+        partnerRequests: [draftRequest, ...others],
+      };
+    });
+
+    showToast('Brouillon de votre demande organisme partenaire sauvegardé.');
+    return draftRequest;
+  };
+
+  /**
+   * Soumission officielle d'une demande de création de compte organisme partenaire :
+   * - Bloque toute soumission multiple si une demande est déjà en cours ou approuvée.
+   * - N'attribue JAMAIS automatiquement le rôle ORGANIZATION.
+   */
+  const submitPartnerOrganizationRequest: AppContextValue['submitPartnerOrganizationRequest'] = (
+    patch
+  ) => {
+    const existing = (state.partnerRequests || []).find(
+      (r) => r.applicantUserId === currentUser.id
+    );
+
+    if (existing && isPartnerSubmissionLocked(existing.status)) {
+      const msg = `Une demande est déjà au statut « ${getPartnerRequestStatusLabel(existing.status)} ». Les soumissions multiples sont bloquées.`;
+      showToast(msg);
+      return {
+        success: false,
+        error: msg,
+      };
+    }
+
+    const nowIso = '2026-11-24T10:15:00Z';
+    const prevStatus: PartnerRequestStatus = existing ? existing.status : 'DRAFT';
+    const merged: PartnerOrganizationRequest = {
+      id: existing?.id || `preq-${Date.now()}`,
+      applicantUserId: currentUser.id,
+      applicantStudentId: currentStudent.id,
+      applicantFullName: currentUser.fullName,
+      applicantEmail: currentUser.email,
+      status: 'SUBMITTED',
+      officialName: (patch.officialName ?? existing?.officialName ?? '').trim(),
+      organizationType:
+        patch.organizationType ?? existing?.organizationType ?? 'Fondation',
+      country: (patch.country ?? existing?.country ?? 'Cameroun').trim(),
+      city: (patch.city ?? existing?.city ?? '').trim(),
+      address: (patch.address ?? existing?.address ?? '').trim(),
+      website: (patch.website ?? existing?.website ?? '').trim(),
+      description: (patch.description ?? existing?.description ?? '').trim(),
+      professionalEmail: (
+        patch.professionalEmail ??
+        existing?.professionalEmail ??
+        ''
+      ).trim(),
+      professionalPhone: (
+        patch.professionalPhone ??
+        existing?.professionalPhone ??
+        ''
+      ).trim(),
+      representativeName: (
+        patch.representativeName ??
+        existing?.representativeName ??
+        currentUser.fullName
+      ).trim(),
+      representativeRole: (
+        patch.representativeRole ??
+        existing?.representativeRole ??
+        ''
+      ).trim(),
+      requestMotivation: (
+        patch.requestMotivation ??
+        existing?.requestMotivation ??
+        ''
+      ).trim(),
+      legalRegistrationNumber: (
+        patch.legalRegistrationNumber ??
+        existing?.legalRegistrationNumber ??
+        ''
+      ).trim(),
+      documents: patch.documents ?? existing?.documents ?? [],
+      createdAt: existing?.createdAt || nowIso,
+      updatedAt: nowIso,
+      submittedAt: nowIso,
+      adminFeedbackNote: existing?.adminFeedbackNote,
+      decisionHistory: [
+        {
+          id: `dec-${Date.now()}`,
+          decidedAt: '2026-11-24 10:15',
+          actorName: currentUser.fullName,
+          actorRole: 'STUDENT',
+          previousStatus: prevStatus,
+          newStatus: 'SUBMITTED',
+          note:
+            prevStatus === 'MORE_INFO_REQUIRED'
+              ? 'Transmission des informations et justificatifs complémentaires demandés.'
+              : 'Soumission initiale de la demande de création d’un compte organisme partenaire.',
+        },
+        ...(existing?.decisionHistory || []),
+      ],
+    };
+
+    setState((prev) => {
+      const others = (prev.partnerRequests || []).filter(
+        (r) => r.applicantUserId !== currentUser.id
+      );
+      const auditLogs = appendAuditLog(
+        prev,
+        'ORG_VERIFICATION',
+        merged.officialName,
+        `Soumission d’une demande de création de compte organisme partenaire par ${currentUser.fullName} (Statut : SUBMITTED — en attente de validation administrative).`
+      );
+      return {
+        ...prev,
+        partnerRequests: [merged, ...others],
+        auditLogs,
+      };
+    });
+
+    showToast(
+      'Demande soumise avec succès. Elle sera examinée par un administrateur SCHOLARFIND.'
+    );
+    return {
+      success: true,
+      request: merged,
+    };
+  };
+
+  /**
+   * Décision administrative sur une demande d'organisme partenaire :
+   * - UNDER_REVIEW : prise en charge du dossier.
+   * - MORE_INFO_REQUIRED : demande de pièces ou précisions complémentaires.
+   * - APPROVED : création/activation du profil organisme vérifié et octroi de la permission
+   *   `ORGANIZATION` en complément de `STUDENT` (`grantedRoles: ['STUDENT', 'ORGANIZATION']`).
+   * - REJECTED : refus motivé avec justification obligatoire.
+   */
+  const decidePartnerOrganizationRequest: AppContextValue['decidePartnerOrganizationRequest'] = (
+    requestId,
+    newStatus,
+    note
+  ) => {
+    setState((prev) => {
+      const target = (prev.partnerRequests || []).find((r) => r.id === requestId);
+      if (!target) return prev;
+
+      const cleanNote =
+        note.trim() ||
+        `Décision administrative : ${getPartnerRequestStatusLabel(newStatus)}.`;
+      const decisionEntry = {
+        id: `dec-${Date.now()}`,
+        decidedAt: '2026-11-24 ' + new Date().toTimeString().slice(0, 5),
+        actorName: currentUser.fullName,
+        actorRole: currentUser.role,
+        previousStatus: target.status,
+        newStatus,
+        note: cleanNote,
+      };
+
+      let createdOrgId = target.createdOrganizationId;
+      let organizations = prev.organizations;
+      let users = prev.users;
+
+      if (newStatus === 'APPROVED') {
+        createdOrgId = target.createdOrganizationId || `org-partner-${Date.now()}`;
+        const existingOrg = prev.organizations.find((o) => o.id === createdOrgId);
+        const newOrgProfile: OrganizationProfile = existingOrg || {
+          id: createdOrgId,
+          userId: target.applicantUserId,
+          officialName: target.officialName,
+          type: adaptPartnerUiTypeToOpenApi(target.organizationType),
+          country: target.country,
+          address: `${target.address}${target.city ? `, ${target.city}` : ''}`,
+          website: target.website,
+          contactEmail: target.professionalEmail,
+          contactPersonName: target.representativeName,
+          contactPersonRole: target.representativeRole,
+          description: target.description,
+          registrationNumber:
+            target.legalRegistrationNumber || 'VERIF-ADMIN-2026',
+          isVerified: true,
+          verificationStatus: 'VERIFIED',
+          verifiedAt: '2026-11-24',
+          activePlan: 'ORG_DISCOVERY',
+          evaluators: [
+            {
+              id: `eval-${Date.now()}`,
+              name: target.representativeName,
+              email: target.professionalEmail,
+              roleTitle: target.representativeRole || 'Représentant habilité',
+              permissionLevel: 'DECISION_FINALE',
+              active: true,
+            },
+          ],
+        };
+
+        if (!existingOrg) {
+          organizations = [newOrgProfile, ...prev.organizations];
+        } else {
+          organizations = prev.organizations.map((o) =>
+            o.id === createdOrgId
+              ? {
+                  ...o,
+                  isVerified: true,
+                  verificationStatus: 'VERIFIED',
+                  verifiedAt: '2026-11-24',
+                }
+              : o
+          );
+        }
+
+        // Octroi de la permission ORGANIZATION au compte utilisateur demandeur tout en conservant STUDENT
+        users = prev.users.map((u) => {
+          if (u.id !== target.applicantUserId) return u;
+          const existingRoles = u.grantedRoles || [u.role];
+          const updatedRoles: UserRole[] = Array.from(
+            new Set([...existingRoles, 'STUDENT', 'ORGANIZATION'])
+          );
+          return {
+            ...u,
+            grantedRoles: updatedRoles,
+            linkedStudentId: u.linkedStudentId || target.applicantStudentId,
+            linkedOrganizationId: createdOrgId,
+          };
+        });
+      }
+
+      const partnerRequests = (prev.partnerRequests || []).map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              updatedAt: '2026-11-24T11:00:00Z',
+              decidedAt:
+                newStatus === 'APPROVED' || newStatus === 'REJECTED'
+                  ? '2026-11-24T11:00:00Z'
+                  : r.decidedAt,
+              adminFeedbackNote:
+                newStatus === 'MORE_INFO_REQUIRED' || newStatus === 'UNDER_REVIEW'
+                  ? cleanNote
+                  : r.adminFeedbackNote,
+              rejectionReason:
+                newStatus === 'REJECTED' ? cleanNote : r.rejectionReason,
+              createdOrganizationId: createdOrgId,
+              decisionHistory: [decisionEntry, ...r.decisionHistory],
+            }
+          : r
+      );
+
+      const applicantNotif: AppNotification = {
+        id: `notif-preq-${Date.now()}`,
+        userId: target.applicantUserId,
+        role: 'STUDENT',
+        category: 'SYSTEM',
+        title: `Demande Organisme Partenaire : ${getPartnerRequestStatusLabel(newStatus)}`,
+        message: `${target.officialName} — ${cleanNote}`,
+        createdAt: '2026-11-24',
+        read: false,
+        linkTo: '/etudiant/devenir-partenaire',
+      };
+
+      const auditLogs = appendAuditLog(
+        prev,
+        'ORG_VERIFICATION',
+        `Demande partenaire : ${target.officialName}`,
+        `Statut modifié vers ${newStatus} (${getPartnerRequestStatusLabel(newStatus)}). Motif : ${cleanNote}`
+      );
+
+      return {
+        ...prev,
+        partnerRequests,
+        organizations,
+        users,
+        notifications: [applicantNotif, ...prev.notifications],
+        auditLogs,
+      };
+    });
+
+    showToast(
+      `Décision enregistrée : ${getPartnerRequestStatusLabel(newStatus)}.`
+    );
   };
 
   /**
@@ -1468,6 +2208,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiConfig,
         setApiMode,
         fallbackToMockMode,
+        authenticateUser,
+        registerPublicStudentAccount,
+        verifyCurrentStudentEmail,
+        switchAuthorizedWorkspace,
+        partnerRequests: state.partnerRequests || [],
+        savePartnerOrganizationRequestDraft,
+        submitPartnerOrganizationRequest,
+        decidePartnerOrganizationRequest,
         registerStudentAccount,
         updateStudentProfile,
         addStudentAcademicRecord,

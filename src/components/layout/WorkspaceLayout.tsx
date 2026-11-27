@@ -17,6 +17,7 @@ import {
   Home,
   LogOut,
   MailOpen,
+  Repeat,
   RotateCcw,
   Search,
   Settings,
@@ -52,8 +53,10 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
     applications,
     notifications,
     duplicates,
+    partnerRequests,
     switchDemoUser,
     switchDemoRole,
+    switchAuthorizedWorkspace,
     logoutUser,
     resetDemoData,
     toastMessage,
@@ -66,10 +69,22 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Synchronise le rôle de démonstration si l'utilisateur navigue directement vers l'URL d'un espace
+  const hasDualStudentOrgAccess = Boolean(
+    currentUser.grantedRoles?.includes('STUDENT') &&
+      currentUser.grantedRoles?.includes('ORGANIZATION')
+  );
+
+  // Synchronise l'espace actif : conserve le compte courant s'il possède la double permission (STUDENT + ORGANIZATION)
   useEffect(() => {
     if (currentUser.role !== workspaceRole) {
-      switchDemoRole(workspaceRole);
+      if (
+        (workspaceRole === 'STUDENT' || workspaceRole === 'ORGANIZATION') &&
+        currentUser.grantedRoles?.includes(workspaceRole)
+      ) {
+        switchAuthorizedWorkspace(workspaceRole);
+      } else {
+        switchDemoRole(workspaceRole);
+      }
     }
   }, [workspaceRole]);
 
@@ -94,6 +109,19 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
     navigate('/');
   };
 
+  const handleAuthorizedWorkspaceSwitch = (
+    targetRole: 'STUDENT' | 'ORGANIZATION'
+  ) => {
+    setAvatarDropdownOpen(false);
+    if (switchAuthorizedWorkspace(targetRole)) {
+      navigate(
+        targetRole === 'ORGANIZATION'
+          ? '/organisme/tableau-de-bord'
+          : '/etudiant/tableau-de-bord'
+      );
+    }
+  };
+
   const studentPendingInvitations = invitations.filter(
     (i) => i.studentId === currentStudent.id && i.status === 'PENDING'
   ).length;
@@ -115,6 +143,13 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
 
   const orgApplicationsCount = applications.filter(
     (a) => a.organizationId === currentOrganization.id
+  ).length;
+
+  const pendingPartnerRequestsCount = (partnerRequests || []).filter(
+    (r) =>
+      r.status === 'SUBMITTED' ||
+      r.status === 'UNDER_REVIEW' ||
+      r.status === 'MORE_INFO_REQUIRED'
   ).length;
 
   // Navigation structurée : 5 destinations principales pour l'espace étudiant
@@ -169,6 +204,7 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
             activePrefixes: [
               '/etudiant/profil',
               '/etudiant/confidentialite',
+              '/etudiant/devenir-partenaire',
             ],
           },
         ],
@@ -324,6 +360,8 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
             label: 'Organismes',
             to: '/admin/organismes',
             icon: Building2,
+            badgeCount: pendingPartnerRequestsCount,
+            activePrefixes: ['/admin/organismes', '/admin/demandes-organismes'],
           },
         ],
       },
@@ -443,6 +481,7 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
         activePrefixes: [
           '/etudiant/profil',
           '/etudiant/confidentialite',
+          '/etudiant/devenir-partenaire',
         ],
       },
     ],
@@ -609,7 +648,7 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
                     className="w-full text-xs bg-white border border-[#E6ECF5] rounded-lg px-2 py-1.5 text-[#253047] focus:outline-none focus:border-[#3457D5]"
                   >
                     {users
-                      .filter((u) => u.role === 'STUDENT')
+                      .filter((u) => u.role === 'STUDENT' || u.grantedRoles?.includes('STUDENT'))
                       .map((u) => (
                         <option key={u.id} value={u.id}>
                           {u.fullName}
@@ -634,7 +673,7 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
                     className="w-full text-xs bg-white border border-[#E6ECF5] rounded-lg px-2 py-1.5 text-[#253047]"
                   >
                     {users
-                      .filter((u) => u.role === 'ORGANIZATION')
+                      .filter((u) => u.role === 'ORGANIZATION' || u.grantedRoles?.includes('ORGANIZATION'))
                       .map((u) => (
                         <option key={u.id} value={u.id}>
                           {u.fullName}
@@ -739,6 +778,31 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
+            {/* Bouton de basculement d'espace lorsque le compte utilisateur dispose des deux permissions (STUDENT + ORGANIZATION) */}
+            {hasDualStudentOrgAccess &&
+              (workspaceRole === 'STUDENT' || workspaceRole === 'ORGANIZATION') && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAuthorizedWorkspaceSwitch(
+                      workspaceRole === 'STUDENT' ? 'ORGANIZATION' : 'STUDENT'
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#3457D5] bg-[#EBF0FF]/70 px-3 py-1.5 text-xs font-bold text-[#3457D5] hover:bg-[#3457D5] hover:text-white transition-colors cursor-pointer"
+                  data-testid="header-workspace-switcher-btn"
+                >
+                  <Repeat className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">
+                    {workspaceRole === 'STUDENT'
+                      ? 'Basculer vers Espace Organisme'
+                      : 'Basculer vers Espace Étudiant'}
+                  </span>
+                  <span className="sm:hidden">
+                    {workspaceRole === 'STUDENT' ? 'Espace Org.' : 'Espace Étu.'}
+                  </span>
+                </button>
+              )}
+
             {workspaceRole === 'STUDENT' && (
               <Link
                 to="/etudiant/notifications"
@@ -804,7 +868,7 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
               {avatarDropdownOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 mt-2 w-56 bg-white border border-[#E6ECF5] rounded-2xl p-2 shadow-sm z-40 space-y-1"
+                  className="absolute right-0 mt-2 w-64 bg-white border border-[#E6ECF5] rounded-2xl p-2 shadow-sm z-40 space-y-1"
                 >
                   <div className="px-3 py-2 border-b border-[#E6ECF5] mb-1">
                     <div className="text-xs font-bold text-[#203454] truncate">
@@ -816,6 +880,29 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
                         : roleLabels[workspaceRole].title}
                     </div>
                   </div>
+
+                  {/* Option de basculement d'espace si la demande d'organisme partenaire est approuvée */}
+                  {hasDualStudentOrgAccess && (
+                    <div className="pb-1 mb-1 border-b border-[#E6ECF5]">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() =>
+                          handleAuthorizedWorkspaceSwitch(
+                            workspaceRole === 'STUDENT' ? 'ORGANIZATION' : 'STUDENT'
+                          )
+                        }
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-[#14533C] bg-[#DDF5EB]/60 hover:bg-[#DDF5EB] transition-colors cursor-pointer text-left"
+                      >
+                        <Repeat className="w-4 h-4 shrink-0" />
+                        <span>
+                          {workspaceRole === 'STUDENT'
+                            ? 'Basculer vers l’Espace Organisme'
+                            : 'Basculer vers l’Espace Étudiant'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
 
                   {workspaceRole === 'STUDENT' ? (
                     <>
@@ -841,7 +928,15 @@ export const WorkspaceLayout: React.FC<{ workspaceRole: UserRole }> = ({
                         className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-[#253047] hover:bg-[#F8FAFD] hover:text-[#3457D5] transition-colors"
                       >
                         <Settings className="w-4 h-4 text-[#69768C]" />
-                        <span>Paramètres</span>
+                        <span>Confidentialité & Visibilité</span>
+                      </Link>
+                      <Link
+                        to="/etudiant/devenir-partenaire"
+                        role="menuitem"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#3457D5] hover:bg-[#EBF0FF]/50 transition-colors"
+                      >
+                        <Building2 className="w-4 h-4 text-[#3457D5]" />
+                        <span>Devenir un organisme partenaire</span>
                       </Link>
                     </>
                   ) : workspaceRole === 'ORGANIZATION' ? (

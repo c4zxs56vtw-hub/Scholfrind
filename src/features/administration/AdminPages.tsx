@@ -1,5 +1,17 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  Clock,
+  Eye,
+  FileText,
+  History,
+  Search,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
 import {
   Button,
   CurationReliabilityNote,
@@ -18,10 +30,15 @@ import {
   AcademicLevel,
   AiExtractionResult,
   FundingType,
+  PartnerOrganizationRequest,
+  PartnerRequestStatus,
+  PartnerSupportingDocument,
   ScholarshipDraft,
   StudyDomain,
   UserRole,
 } from '../../types';
+import { getPartnerRequestStatusLabel } from '../auth/authAndPartnerLogic';
+import { PartnerRequestStatusBadge } from '../students/PartnerOrganizationRequestPage';
 
 /**
  * 1. TABLEAU DE BORD ADMINISTRATEUR (/admin/tableau-de-bord)
@@ -243,72 +260,563 @@ export const AdminUsersPage: React.FC = () => {
 };
 
 /**
- * 3. GESTION DES ORGANISMES (/admin/organismes)
+ * 3. GESTION DES ORGANISMES & DEMANDES PARTENAIRES (/admin/organismes & /admin/demandes-organismes)
  */
 export const AdminOrganizationsPage: React.FC = () => {
-  const { organizations, verifyOrganizationAccount } = useApp();
+  const {
+    organizations,
+    partnerRequests = [],
+    verifyOrganizationAccount,
+    decidePartnerOrganizationRequest,
+  } = useApp();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('TOUS');
+  const [countryFilter, setCountryFilter] = useState<string>('TOUS');
+  const [typeFilter, setTypeFilter] = useState<string>('TOUS');
+
+  const [previewDoc, setPreviewDoc] =
+    useState<PartnerSupportingDocument | null>(null);
+
+  // État de la modale de confirmation obligatoire avant toute décision sensible
+  const [decisionModal, setDecisionModal] = useState<{
+    request: PartnerOrganizationRequest;
+    targetStatus:
+      | 'UNDER_REVIEW'
+      | 'MORE_INFO_REQUIRED'
+      | 'APPROVED'
+      | 'REJECTED';
+  } | null>(null);
+  const [decisionNote, setDecisionNote] = useState('');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+
+  const availableCountries = useMemo(() => {
+    const set = new Set<string>();
+    partnerRequests.forEach((r) => {
+      if (r.country) set.add(r.country);
+    });
+    return Array.from(set);
+  }, [partnerRequests]);
+
+  const filteredRequests = useMemo(() => {
+    return partnerRequests.filter((req) => {
+      if (statusFilter !== 'TOUS' && req.status !== statusFilter) return false;
+      if (countryFilter !== 'TOUS' && req.country !== countryFilter)
+        return false;
+      if (typeFilter !== 'TOUS' && req.organizationType !== typeFilter)
+        return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const hay =
+          `${req.officialName} ${req.representativeName} ${req.professionalEmail} ${req.legalRegistrationNumber} ${req.city}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [partnerRequests, statusFilter, countryFilter, typeFilter, searchQuery]);
+
+  const openDecisionModal = (
+    request: PartnerOrganizationRequest,
+    targetStatus:
+      | 'UNDER_REVIEW'
+      | 'MORE_INFO_REQUIRED'
+      | 'APPROVED'
+      | 'REJECTED'
+  ) => {
+    setDecisionModal({ request, targetStatus });
+    setDecisionError(null);
+    if (targetStatus === 'APPROVED') {
+      setDecisionNote(
+        'Vérification de l’existence légale et du mandat du représentant conforme. Approbation et octroi de la permission ORGANIZATION.'
+      );
+    } else if (targetStatus === 'UNDER_REVIEW') {
+      setDecisionNote(
+        'Prise en charge du dossier par l’administrateur pour vérification des pièces justificatives.'
+      );
+    } else {
+      setDecisionNote('');
+    }
+  };
+
+  const handleConfirmDecision = () => {
+    if (!decisionModal) return;
+    const { request, targetStatus } = decisionModal;
+
+    if (
+      (targetStatus === 'REJECTED' ||
+        targetStatus === 'MORE_INFO_REQUIRED') &&
+      decisionNote.trim().length < 10
+    ) {
+      setDecisionError(
+        targetStatus === 'REJECTED'
+          ? 'Une justification détaillée (minimum 10 caractères) est obligatoire pour refuser une demande.'
+          : 'Veuillez préciser clairement les documents ou informations complémentaires attendus (minimum 10 caractères).'
+      );
+      return;
+    }
+
+    decidePartnerOrganizationRequest(request.id, targetStatus, decisionNote);
+    setDecisionModal(null);
+    setDecisionNote('');
+    setDecisionError(null);
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="VÉRIFICATION INSTITUTIONNELLE"
-        title="Gestion et accréditation des organismes"
-        subtitle="Examinez les structures inscrites, approuvez leur vérification pour débloquer la recherche de candidats volontaires ou suspendez un compte."
+        kicker="GOUVERNANCE & VÉRIFICATION INSTITUTIONNELLE"
+        title="Demandes d’organismes partenaires & Accréditations"
+        subtitle="Examinez les demandes de création d’espace organisme partenaire, contrôlez les pièces justificatives et approuvez ou refusez l’attribution de la permission ORGANIZATION."
       />
 
-      <div className="space-y-4">
-        {organizations.map((org) => (
-          <Panel
-            key={org.id}
-            title={org.officialName}
-            subtitle={`${org.type} · ${org.country} · Agrément : ${org.registrationNumber}`}
-            headerRight={
-              <span className="px-2.5 py-1 rounded bg-[#3457D5]/10 text-[#203454] font-semibold text-xs">
-                Statut : {org.verificationStatus}
-              </span>
-            }
-          >
-            <div className="space-y-3 text-xs">
-              <p className="text-[#69768C]">{org.description}</p>
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#E6ECF5]">
-                <span className="text-[#253047]">
-                  Contact : <strong>{org.contactPersonName}</strong> (
-                  {org.contactEmail})
+      {/* SECTION 1 : DEMANDES DE CRÉATION D'ESPACE ORGANISME PARTENAIRE */}
+      <section className="space-y-4" data-testid="admin-partner-requests-section">
+        <div className="rounded-2xl border border-[#E6ECF5] bg-white p-4 sm:p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-[#203454] flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-[#3457D5]" />
+                <span>
+                  Demandes de création de compte organisme partenaire (
+                  {filteredRequests.length})
                 </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() =>
-                      verifyOrganizationAccount(org.id, 'VERIFIED')
-                    }
-                  >
-                    Approuver & Vérifier
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      verifyOrganizationAccount(org.id, 'SUSPENDED')
-                    }
-                  >
-                    Suspendre
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() =>
-                      verifyOrganizationAccount(org.id, 'REJECTED')
-                    }
-                  >
-                    Rejeter
-                  </Button>
+              </h2>
+              <p className="text-xs text-[#69768C] mt-0.5">
+                Toute décision sensible (Approbation, Demande de compléments, Refus) requiert une confirmation explicite et est journalisée.
+              </p>
+            </div>
+          </div>
+
+          {/* Barre de recherche et filtres (Statut, Pays, Type d'organisme) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#69768C]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Rechercher organisme, représentant..."
+                aria-label="Rechercher une demande d'organisme"
+                className="w-full rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] pl-9 pr-3 py-2 text-xs text-[#203454] focus:border-[#3457D5] focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <select
+                aria-label="Filtrer par statut"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] px-3 py-2 text-xs font-semibold text-[#203454] focus:border-[#3457D5] focus:bg-white focus:outline-none"
+              >
+                <option value="TOUS">Tous les statuts</option>
+                <option value="SUBMITTED">Soumise (SUBMITTED)</option>
+                <option value="UNDER_REVIEW">
+                  En cours de vérification (UNDER_REVIEW)
+                </option>
+                <option value="MORE_INFO_REQUIRED">
+                  Compléments requis (MORE_INFO_REQUIRED)
+                </option>
+                <option value="APPROVED">Approuvée (APPROVED)</option>
+                <option value="REJECTED">Refusée (REJECTED)</option>
+                <option value="DRAFT">Brouillon (DRAFT)</option>
+              </select>
+            </div>
+
+            <div>
+              <select
+                aria-label="Filtrer par pays"
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+                className="w-full rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] px-3 py-2 text-xs font-semibold text-[#203454] focus:border-[#3457D5] focus:bg-white focus:outline-none"
+              >
+                <option value="TOUS">Tous les pays</option>
+                {availableCountries.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <select
+                aria-label="Filtrer par type d'organisme"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="w-full rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] px-3 py-2 text-xs font-semibold text-[#203454] focus:border-[#3457D5] focus:bg-white focus:outline-none"
+              >
+                <option value="TOUS">Tous les types d’organismes</option>
+                <option value="Fondation">Fondation</option>
+                <option value="Université">Université</option>
+                <option value="ONG">ONG</option>
+                <option value="Entreprise">Entreprise</option>
+                <option value="Institution publique">
+                  Institution publique
+                </option>
+                <option value="Autre">Autre</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Liste des demandes partenaires */}
+        {filteredRequests.length === 0 ? (
+          <div className="rounded-2xl border border-[#E6ECF5] bg-white p-8 text-center text-xs text-[#69768C]">
+            Aucune demande d’organisme partenaire ne correspond à vos critères de recherche.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredRequests.map((req) => (
+              <div
+                key={req.id}
+                className="rounded-2xl border border-[#E6ECF5] bg-white p-5 sm:p-6 shadow-xs space-y-4"
+                data-testid={`admin-partner-request-card-${req.id}`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-[#E6ECF5] pb-4">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                      <PartnerRequestStatusBadge status={req.status} />
+                      <span className="rounded-lg bg-[#F8FAFD] border border-[#E6ECF5] px-2.5 py-0.5 text-[11px] font-bold text-[#203454]">
+                        {req.organizationType}
+                      </span>
+                      <span className="text-[11px] text-[#69768C]">
+                        {req.city}, {req.country} · Agrément :{' '}
+                        <strong className="text-[#203454]">
+                          {req.legalRegistrationNumber || 'Non spécifié'}
+                        </strong>
+                      </span>
+                    </div>
+                    <h3 className="text-base sm:text-lg font-bold text-[#203454]">
+                      {req.officialName}
+                    </h3>
+                    <p className="text-xs text-[#69768C] mt-0.5">
+                      {req.description}
+                    </p>
+                  </div>
+
+                  {/* Actions administratives avec confirmation modale */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {req.status === 'SUBMITTED' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => openDecisionModal(req, 'UNDER_REVIEW')}
+                      >
+                        Marquer en cours d’examen
+                      </Button>
+                    )}
+                    {req.status !== 'APPROVED' && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => openDecisionModal(req, 'APPROVED')}
+                      >
+                        Approuver la demande
+                      </Button>
+                    )}
+                    {req.status !== 'APPROVED' &&
+                      req.status !== 'MORE_INFO_REQUIRED' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            openDecisionModal(req, 'MORE_INFO_REQUIRED')
+                          }
+                        >
+                          Demander des compléments
+                        </Button>
+                      )}
+                    {req.status !== 'REJECTED' && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => openDecisionModal(req, 'REJECTED')}
+                      >
+                        Refuser
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Grille : Informations du représentant & Pièces justificatives */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] p-3.5 space-y-1.5">
+                    <h4 className="font-extrabold uppercase tracking-wider text-[11px] text-[#203454]">
+                      Informations du représentant
+                    </h4>
+                    <p>
+                      <span className="text-[#69768C]">Représentant : </span>
+                      <strong className="text-[#203454]">
+                        {req.representativeName}
+                      </strong>{' '}
+                      ({req.representativeRole})
+                    </p>
+                    <p>
+                      <span className="text-[#69768C]">Coordonnées pro : </span>
+                      <span className="font-semibold text-[#203454]">
+                        {req.professionalEmail} · {req.professionalPhone}
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-[#69768C]">Site officiel : </span>
+                      <span className="font-semibold text-[#3457D5]">
+                        {req.website}
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-[#69768C]">Motif déclaré : </span>
+                      <span className="text-[#203454]">
+                        {req.requestMotivation}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] p-3.5 space-y-2">
+                    <h4 className="font-extrabold uppercase tracking-wider text-[11px] text-[#203454]">
+                      Justificatifs transmis ({req.documents.length})
+                    </h4>
+                    {req.documents.length === 0 ? (
+                      <p className="text-[#9A3412]">
+                        Aucun document justificatif joint.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {req.documents.map((doc) => (
+                          <div
+                            key={doc.id}
+                            className="flex items-center justify-between rounded-lg border border-[#DCE6F7] bg-white px-2.5 py-1.5"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="h-3.5 w-3.5 text-[#3457D5] shrink-0" />
+                              <span className="truncate font-semibold text-[#203454]">
+                                {doc.fileName}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewDoc(doc)}
+                              className="inline-flex items-center gap-1 rounded bg-[#EBF0FF] px-2 py-0.5 text-[11px] font-bold text-[#3457D5] hover:bg-[#3457D5] hover:text-white transition-colors shrink-0 ml-2 cursor-pointer"
+                            >
+                              <Eye className="h-3 w-3" /> Examiner
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Historique des décisions sur la demande */}
+                {req.decisionHistory.length > 0 && (
+                  <div className="rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] p-3 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-[#203454] mb-2">
+                      <History className="h-3.5 w-3.5 text-[#3457D5]" />
+                      <span>
+                        Historique des décisions ({req.decisionHistory.length})
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {req.decisionHistory.map((d) => (
+                        <div
+                          key={d.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] border-t border-[#E6ECF5] pt-1.5 first:border-t-0 first:pt-0"
+                        >
+                          <div>
+                            <strong className="text-[#203454]">
+                              {getPartnerRequestStatusLabel(d.newStatus)}
+                            </strong>{' '}
+                            <span className="text-[#69768C]">
+                              par {d.actorName} :
+                            </span>{' '}
+                            <span className="text-[#253047]">{d.note}</span>
+                          </div>
+                          <span className="font-mono text-[#69768C] shrink-0">
+                            {d.decidedAt}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* SECTION 2 : RÉPERTOIRE DES ORGANISMES DÉJÀ ENREGISTRÉS */}
+      <section className="space-y-4 pt-4 border-t border-[#E6ECF5]">
+        <h2 className="text-base sm:text-lg font-bold text-[#203454]">
+          Répertoire des organismes enregistrés ({organizations.length})
+        </h2>
+        <div className="space-y-4">
+          {organizations.map((org) => (
+            <Panel
+              key={org.id}
+              title={org.officialName}
+              subtitle={`${org.type} · ${org.country} · Agrément : ${org.registrationNumber}`}
+              headerRight={
+                <span className="px-2.5 py-1 rounded bg-[#3457D5]/10 text-[#203454] font-semibold text-xs">
+                  Statut : {org.verificationStatus}
+                </span>
+              }
+            >
+              <div className="space-y-3 text-xs">
+                <p className="text-[#69768C]">{org.description}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#E6ECF5]">
+                  <span className="text-[#253047]">
+                    Contact : <strong>{org.contactPersonName}</strong> (
+                    {org.contactEmail})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() =>
+                        verifyOrganizationAccount(org.id, 'VERIFIED')
+                      }
+                    >
+                      Approuver & Vérifier
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        verifyOrganizationAccount(org.id, 'SUSPENDED')
+                      }
+                    >
+                      Suspendre
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() =>
+                        verifyOrganizationAccount(org.id, 'REJECTED')
+                      }
+                    >
+                      Rejeter
+                    </Button>
+                  </div>
                 </div>
               </div>
+            </Panel>
+          ))}
+        </div>
+      </section>
+
+      {/* Modale d'aperçu confidentiel des pièces justificatives */}
+      {previewDoc && (
+        <Modal
+          isOpen={Boolean(previewDoc)}
+          onClose={() => setPreviewDoc(null)}
+          title={`Examen de pièce justificative : ${previewDoc.fileName}`}
+        >
+          <div className="space-y-4 text-xs">
+            <div className="rounded-xl border border-[#DCE6F7] bg-[#F8FAFD] p-3.5 space-y-1">
+              <p className="font-bold text-[#203454]">
+                Fichier : {previewDoc.fileName} (
+                {Math.round(previewDoc.sizeBytes / 1024)} Ko)
+              </p>
+              <p className="text-[#69768C]">
+                Téléversé le {previewDoc.uploadedAt} · Type :{' '}
+                {previewDoc.mimeType}
+              </p>
             </div>
-          </Panel>
-        ))}
-      </div>
+            <div className="rounded-xl border border-[#E6ECF5] bg-white p-4 space-y-2">
+              <div className="flex items-center gap-2 font-bold text-[#14533C]">
+                <ShieldCheck className="h-4 w-4 text-[#1F8A5C]" />
+                <span>Synthèse du document certifié</span>
+              </div>
+              <p className="text-[#203454] leading-relaxed">
+                {previewDoc.confidentialPreviewSummary}
+              </p>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modale de confirmation obligatoire avant toute décision sensible */}
+      {decisionModal && (
+        <Modal
+          isOpen={Boolean(decisionModal)}
+          onClose={() => setDecisionModal(null)}
+          title={`Confirmation de décision : ${getPartnerRequestStatusLabel(
+            decisionModal.targetStatus
+          )}`}
+        >
+          <div className="space-y-4 text-xs" data-testid="admin-decision-modal">
+            <div className="rounded-xl border border-[#DCE6F7] bg-[#F8FAFD] p-3.5 space-y-1">
+              <p className="font-bold text-[#203454]">
+                Organisme : {decisionModal.request.officialName}
+              </p>
+              <p className="text-[#69768C]">
+                Représentant : {decisionModal.request.representativeName} (
+                {decisionModal.request.professionalEmail})
+              </p>
+            </div>
+
+            {decisionModal.targetStatus === 'APPROVED' && (
+              <div className="rounded-xl border border-[#A7E3C9] bg-[#DDF5EB]/60 p-3 text-[#14533C]">
+                <strong>Action sensible :</strong> L’approbation créera le profil organisme vérifié et accordera la permission{' '}
+                <code className="font-mono font-bold">ORGANIZATION</code> au compte de{' '}
+                <strong>{decisionModal.request.applicantFullName}</strong>, lui permettant de basculer entre son Espace Étudiant et son Espace Organisme.
+              </div>
+            )}
+
+            {decisionError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-xl border border-[#F5C2C2] bg-[#FCE8E8] p-3 text-[#9E2A2A]"
+              >
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{decisionError}</span>
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="admin-decision-note"
+                className="block font-bold text-[#203454] mb-1.5"
+              >
+                {decisionModal.targetStatus === 'REJECTED'
+                  ? 'Justification obligatoire du refus *'
+                  : decisionModal.targetStatus === 'MORE_INFO_REQUIRED'
+                  ? 'Précisez les documents ou informations complémentaires attendus *'
+                  : 'Note de décision / Commentaire d’audit'}
+              </label>
+              <textarea
+                id="admin-decision-note"
+                rows={3}
+                value={decisionNote}
+                onChange={(e) => setDecisionNote(e.target.value)}
+                placeholder="Saisissez le motif ou les instructions destinées au représentant..."
+                className="w-full rounded-xl border border-[#E6ECF5] bg-[#F8FAFD] p-3 text-xs text-[#203454] focus:border-[#3457D5] focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#E6ECF5]">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setDecisionModal(null)}
+              >
+                Annuler
+              </Button>
+              <Button
+                variant={
+                  decisionModal.targetStatus === 'REJECTED'
+                    ? 'danger'
+                    : 'primary'
+                }
+                size="sm"
+                onClick={handleConfirmDecision}
+              >
+                Confirmer la décision
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

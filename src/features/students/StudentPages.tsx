@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Bell,
   Bookmark,
+  Building2,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -13,6 +14,7 @@ import {
   GraduationCap,
   Lock,
   MailOpen,
+  Repeat,
   Search,
   Settings,
   SlidersHorizontal,
@@ -167,13 +169,17 @@ const ActivitesSubNav: React.FC = () => {
 
 /**
  * Sous-navigation de la rubrique « Profil »
- * Permet de basculer en 1 clic entre Mon profil et Confidentialité & Visibilité.
+ * Permet de basculer en 1 clic entre Mon profil, Confidentialité & Visibilité,
+ * et Devenir un organisme partenaire (sans surcharger la navigation principale).
  */
-const ProfilSubNav: React.FC = () => {
+export const ProfilSubNav: React.FC = () => {
   const location = useLocation();
   const isProfil = location.pathname.startsWith('/etudiant/profil');
   const isConfidentialite = location.pathname.startsWith(
     '/etudiant/confidentialite'
+  );
+  const isDevenirPartenaire = location.pathname.startsWith(
+    '/etudiant/devenir-partenaire'
   );
 
   return (
@@ -203,6 +209,17 @@ const ProfilSubNav: React.FC = () => {
       >
         <Settings className="w-3.5 h-3.5" />
         <span>Confidentialité & Visibilité</span>
+      </Link>
+      <Link
+        to="/etudiant/devenir-partenaire"
+        className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+          isDevenirPartenaire
+            ? 'bg-[#3457D5] text-white'
+            : 'text-[#69768C] hover:text-[#203454] hover:bg-[#F8FAFD]'
+        }`}
+      >
+        <Building2 className="w-3.5 h-3.5" />
+        <span>Devenir un organisme partenaire</span>
       </Link>
     </div>
   );
@@ -784,11 +801,22 @@ export const StudentDashboardPage: React.FC = () => {
  */
 export const StudentProfilePage: React.FC = () => {
   const {
+    currentUser,
     currentStudent,
+    partnerRequests,
+    switchAuthorizedWorkspace,
     updateStudentProfile,
     addStudentAcademicRecord,
     removeStudentAcademicRecord,
   } = useApp();
+  const navigate = useNavigate();
+  const myPartnerRequest = useMemo(
+    () => (partnerRequests || []).find((r) => r.applicantUserId === currentUser.id),
+    [partnerRequests, currentUser.id]
+  );
+  const hasOrganizationPermission = Boolean(
+    currentUser.grantedRoles?.includes('ORGANIZATION')
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [isAddDiplomaOpen, setIsAddDiplomaOpen] = useState(false);
   const [newDiplomaLevel, setNewDiplomaLevel] =
@@ -1596,6 +1624,65 @@ export const StudentProfilePage: React.FC = () => {
               </dd>
             </div>
           </dl>
+        </section>
+
+        {/* SECTION 4 : DEVENIR UN ORGANISME PARTENAIRE & BASCULEMENT D'ESPACE */}
+        <section
+          aria-labelledby="section-partenaire-organisme"
+          className="bg-white border border-[#E6ECF5] rounded-3xl p-6 sm:p-7 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-2 text-xs font-bold text-[#3457D5]">
+              <Building2 className="w-4 h-4" />
+              <span>
+                {hasOrganizationPermission
+                  ? 'Double espace autorisé (Étudiant & Organisme partenaire)'
+                  : 'Représenter une institution ou un organisme financeur'}
+              </span>
+            </div>
+            <h2
+              id="section-partenaire-organisme"
+              className="text-base sm:text-lg font-bold text-[#203454]"
+            >
+              {hasOrganizationPermission
+                ? 'Basculer entre votre Espace Étudiant et votre Espace Organisme'
+                : 'Devenir un organisme partenaire SCHOLARFIND'}
+            </h2>
+            <p className="text-xs sm:text-sm text-[#69768C] max-w-2xl">
+              {hasOrganizationPermission
+                ? 'Votre demande d’organisme partenaire a été approuvée par l’administrateur. Vous pouvez basculer à tout moment vers votre espace organisme pour publier des bourses et gérer vos campagnes.'
+                : myPartnerRequest
+                ? `Vous avez une demande enregistrée pour « ${myPartnerRequest.officialName} ». Consultez l’avancement de sa vérification ou complétez vos justificatifs.`
+                : 'Vous représentez une université, une fondation, une ONG, une entreprise ou une institution publique ? Soumettez une demande vérifiée pour créer un espace organisme partenaire.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {hasOrganizationPermission && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (switchAuthorizedWorkspace('ORGANIZATION')) {
+                    navigate('/organisme/tableau-de-bord');
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#203454] text-white text-xs font-bold hover:bg-[#3457D5] transition-colors cursor-pointer"
+              >
+                <Repeat className="w-3.5 h-3.5" />
+                <span>Ouvrir l’Espace Organisme</span>
+              </button>
+            )}
+            <Link
+              to="/etudiant/devenir-partenaire"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#3457D5] bg-[#EBF0FF]/60 text-[#3457D5] text-xs font-bold hover:bg-[#3457D5] hover:text-white transition-colors"
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>
+                {myPartnerRequest
+                  ? 'Suivre ma demande partenaire'
+                  : 'Devenir un organisme partenaire'}
+              </span>
+            </Link>
+          </div>
         </section>
       </div>
     );

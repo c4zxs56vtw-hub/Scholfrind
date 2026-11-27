@@ -9,7 +9,6 @@ import { AppProvider } from './context/AppContext';
 import { PublicLayout } from './components/layout/PublicLayout';
 import { WorkspaceLayout } from './components/layout/WorkspaceLayout';
 import {
-  AuthPage,
   HomePage,
   HowItWorksPage,
   OrganizationsDirectoryPage,
@@ -17,6 +16,11 @@ import {
   PublicCatalogPage,
   ScholarshipDetailPage,
 } from './features/public/PublicPages';
+import {
+  ForgotPasswordPage,
+  LoginPage,
+  RegisterPage,
+} from './features/auth/AuthPages';
 import {
   StudentDashboardPage,
   StudentEligibilityPage,
@@ -27,6 +31,7 @@ import {
   StudentProfilePage,
   StudentRecommendationsPage,
 } from './features/students/StudentPages';
+import { PartnerOrganizationRequestPage } from './features/students/PartnerOrganizationRequestPage';
 import {
   CreateCampaignPage,
   OrganizationApplicationsPage,
@@ -62,10 +67,11 @@ export default function App() {
     <AppProvider>
       <BrowserRouter>
         <Routes>
-          {/* 1. PAGES PUBLIQUES */}
+          {/* 1. PAGES PUBLIQUES & AUTHENTIFICATION */}
           <Route element={<PublicLayout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/bourses" element={<PublicCatalogPage />} />
+            <Route path="/catalogue" element={<PublicCatalogPage />} />
             <Route path="/bourses/:id" element={<ScholarshipDetailPage />} />
             <Route path="/fonctionnement" element={<HowItWorksPage />} />
             <Route
@@ -73,13 +79,15 @@ export default function App() {
               element={<OrganizationsDirectoryPage />}
             />
             <Route path="/tarification" element={<PricingPage />} />
+            <Route path="/connexion" element={<LoginPage />} />
+            <Route path="/inscription" element={<RegisterPage />} />
             <Route
-              path="/connexion"
-              element={<AuthPage mode="LOGIN" />}
+              path="/mot-de-passe-oublie"
+              element={<ForgotPasswordPage initialStep="REQUEST" />}
             />
             <Route
-              path="/inscription"
-              element={<AuthPage mode="REGISTER" />}
+              path="/reinitialiser-mot-de-passe"
+              element={<ForgotPasswordPage initialStep="RESET" />}
             />
           </Route>
 
@@ -125,6 +133,10 @@ export default function App() {
             <Route
               path="/etudiant/confidentialite"
               element={<StudentPrivacyPage />}
+            />
+            <Route
+              path="/etudiant/devenir-partenaire"
+              element={<PartnerOrganizationRequestPage />}
             />
           </Route>
 
@@ -224,6 +236,10 @@ export default function App() {
             />
             <Route
               path="/admin/organismes"
+              element={<AdminOrganizationsPage />}
+            />
+            <Route
+              path="/admin/demandes-organismes"
               element={<AdminOrganizationsPage />}
             />
             <Route

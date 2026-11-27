@@ -360,6 +360,10 @@ export interface UserAccount {
   createdAt: string;
   lastLoginAt: string;
   linkedEntityId: string; // studentProfile.id ou organizationProfile.id
+  grantedRoles?: UserRole[]; // Permissions retournées par le backend (ex: ['STUDENT', 'ORGANIZATION'] après approbation)
+  linkedStudentId?: string;
+  linkedOrganizationId?: string;
+  emailVerified?: boolean;
 }
 
 export interface AuditLogEntry {
@@ -505,4 +509,83 @@ export interface SubscriptionRequest {
   requestNote?: string;
   decisionReason?: string;
 }
+
+/**
+ * Demande de création d'un espace organisme partenaire soumise par un utilisateur authentifié (STUDENT)
+ */
+export type PartnerRequestStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'UNDER_REVIEW'
+  | 'MORE_INFO_REQUIRED'
+  | 'APPROVED'
+  | 'REJECTED';
+
+export type PartnerOrganizationUiType =
+  | 'Entreprise'
+  | 'Université'
+  | 'Fondation'
+  | 'ONG'
+  | 'Institution publique'
+  | 'Autre';
+
+export interface PartnerSupportingDocument {
+  id: string;
+  category: 'LEGAL_EXISTENCE' | 'REPRESENTATIVE_AUTHORIZATION' | 'ADDITIONAL_INFO';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  confidentialPreviewSummary: string;
+}
+
+export interface PartnerDecisionRecord {
+  id: string;
+  decidedAt: string;
+  actorName: string;
+  actorRole: UserRole;
+  previousStatus: PartnerRequestStatus;
+  newStatus: PartnerRequestStatus;
+  note: string;
+}
+
+export interface PartnerOrganizationRequest {
+  id: string;
+  applicantUserId: string;
+  applicantStudentId: string;
+  applicantFullName: string;
+  applicantEmail: string;
+  status: PartnerRequestStatus;
+
+  // Étape 1 — Informations sur l'organisme
+  officialName: string;
+  organizationType: PartnerOrganizationUiType;
+  country: string;
+  city: string;
+  address: string;
+  website: string;
+  description: string;
+
+  // Étape 2 — Informations professionnelles
+  professionalEmail: string;
+  professionalPhone: string;
+  representativeName: string;
+  representativeRole: string;
+  requestMotivation: string;
+
+  // Étape 3 — Justificatifs
+  legalRegistrationNumber: string;
+  documents: PartnerSupportingDocument[];
+
+  // Suivi & Décisions administratives
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+  decidedAt?: string;
+  adminFeedbackNote?: string;
+  rejectionReason?: string;
+  createdOrganizationId?: string;
+  decisionHistory: PartnerDecisionRecord[];
+}
+
 

@@ -1145,9 +1145,107 @@ export const adminApiService = {
   },
 };
 
+// ============================================================================
+// 6. AUTHENTIFICATION, INSCRIPTION PUBLIQUE & RÉCUPÉRATION MOT DE PASSE (/auth/*)
+// ============================================================================
+export const authApiService = {
+  /**
+   * operationId: loginUser
+   * POST /auth/login
+   */
+  async loginUser(payload: { email: string; password: string }) {
+    const config = getApiRuntimeConfig();
+    if (config.mode === 'real') {
+      return executeHttpRequest<{
+        accessToken: string;
+        tokenType: string;
+        expiresIn: number;
+        user: ApiUserAccountDto;
+      }>({
+        method: 'POST',
+        path: '/auth/login',
+        body: payload,
+      });
+    }
+    return null;
+  },
+
+  /**
+   * operationId: registerStudent
+   * POST /auth/register/student
+   * RÈGLE DE SÉCURITÉ : L'inscription publique crée exclusivement un compte STUDENT.
+   */
+  async registerPublicStudent(payload: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    nationality?: string;
+    residenceCountry?: string;
+  }) {
+    const config = getApiRuntimeConfig();
+    if (config.mode === 'real') {
+      return executeHttpRequest<{
+        accessToken: string;
+        tokenType: string;
+        expiresIn: number;
+        user: ApiUserAccountDto;
+      }>({
+        method: 'POST',
+        path: '/auth/register/student',
+        body: {
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+          email: payload.email,
+          password: payload.password,
+          nationality: payload.nationality || 'Cameroun',
+          residenceCountry: payload.residenceCountry || 'Cameroun',
+        },
+      });
+    }
+    return null;
+  },
+
+  /**
+   * operationId: requestPasswordReset
+   * POST /auth/password/forgot
+   * RÈGLE DE SÉCURITÉ : Réponse générique (202 Accepted) qui ne révèle jamais si l'email existe.
+   */
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
+    const config = getApiRuntimeConfig();
+    if (config.mode === 'real') {
+      return executeHttpRequest<{ message: string }>({
+        method: 'POST',
+        path: '/auth/password/forgot',
+        body: { email },
+      });
+    }
+    return {
+      message:
+        'Si cette adresse email est associée à un compte SCHOLARFIND actif, un lien sécurisé de réinitialisation vous a été envoyé.',
+    };
+  },
+
+  /**
+   * operationId: resetPassword
+   * POST /auth/password/reset
+   */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const config = getApiRuntimeConfig();
+    if (config.mode === 'real') {
+      await executeHttpRequest<void>({
+        method: 'POST',
+        path: '/auth/password/reset',
+        body: { token, newPassword },
+      });
+    }
+  },
+};
+
 export {
   adaptApiOfficialSourceToUi,
   adaptUiOfficialSourceToApi,
   adaptApiNotificationToUi,
   computeMissingPublicationFields,
 };
+
